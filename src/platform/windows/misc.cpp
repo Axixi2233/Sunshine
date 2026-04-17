@@ -73,6 +73,11 @@ namespace {
 
   std::atomic<bool> used_nt_set_timer_resolution = false;
 
+  std::string trim_system_message(std::string message) {
+    boost::trim_right_if(message, boost::is_any_of("\r\n\t ."));
+    return message;
+  }
+
   bool nt_set_timer_resolution_max() {
     ULONG maximum;
     ULONG minimum;
@@ -205,12 +210,38 @@ namespace platf {
     return hDesk;
   }
 
+  std::string format_system_message(DWORD status) {
+    wchar_t *err_string = nullptr;
+
+    const auto bytes = FormatMessageW(
+      FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS | FORMAT_MESSAGE_MAX_WIDTH_MASK,
+      nullptr,
+      status,
+      MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+      reinterpret_cast<LPWSTR>(&err_string),
+      0,
+      nullptr
+    );
+
+    if (!bytes || !err_string) {
+      return {};
+    }
+
+    std::wstring message {err_string, bytes};
+    LocalFree(err_string);
+
+    return trim_system_message(utf_utils::to_utf8(message));
+  }
+
   void print_status(const std::string_view &prefix, HRESULT status) {
-    char err_string[1024];
+    auto message = format_system_message(static_cast<DWORD>(status));
 
-    DWORD bytes = FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr, status, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), err_string, sizeof(err_string), nullptr);
+    if (!message.empty()) {
+      BOOST_LOG(error) << prefix << ": "sv << message;
+      return;
+    }
 
-    BOOST_LOG(error) << prefix << ": "sv << std::string_view {err_string, bytes};
+    BOOST_LOG(error) << prefix << ": 0x"sv << util::hex(status).to_string_view();
   }
 
   bool IsUserAdmin(HANDLE user_token) {

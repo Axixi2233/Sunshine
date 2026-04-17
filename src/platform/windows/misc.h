@@ -15,6 +15,7 @@
 #include <winnt.h>
 
 namespace platf {
+  std::string format_system_message(DWORD status);
   void print_status(const std::string_view &prefix, HRESULT status);
   HDESK syncThreadDesktop();
 

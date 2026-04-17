@@ -51,6 +51,20 @@ namespace display_device {
   [[nodiscard]] std::string map_output_name(const std::string &output_name);
 
   /**
+   * @brief Map the display name back to its stable device id.
+   * @param display_name Active display name such as "\\.\DISPLAY1".
+   * @returns Device id or empty string if the display could not be mapped.
+   */
+  [[nodiscard]] std::string map_display_name(const std::string &display_name);
+
+  /**
+   * @brief Ensure that a specific display device is active immediately.
+   * @param device_id Stable device id returned by enumerate_devices().
+   * @returns True if the device is active or was activated successfully.
+   */
+  [[nodiscard]] bool ensure_device_active(const std::string &device_id);
+
+  /**
    * @brief Configure the display device based on the user configuration and the session information.
    * @note This is a convenience method for calling similar method of a different signature.
    *

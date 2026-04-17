@@ -5,7 +5,12 @@
 #define BOOST_BIND_GLOBAL_PLACEHOLDERS
 
 // standard includes
+#include <array>
+#include <cctype>
+#include <cstring>
 #include <filesystem>
+#include <optional>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -30,8 +35,10 @@
 #include "process.h"
 #include "system_tray.h"
 #include "utility.h"
+#include "uuid.h"
 
 #ifdef _WIN32
+  #include "platform/windows/virtual_display.h"
   // from_utf8() string conversion function
   #include "platform/windows/utf_utils.h"
 
@@ -44,11 +51,256 @@ namespace proc {
   namespace pt = boost::property_tree;
 
   proc_t proc;
+  uint32_t calculate_crc32(const std::string &input);
+
+#ifdef _WIN32
+  namespace {
+    struct virtual_display_state_t {
+      std::string initial_output_name;
+      config::video_t::dd_t::config_option_e initial_configuration_option {};
+      std::string display_name;
+      std::string device_id;
+      GUID guid {};
+    };
+
+    VDISPLAY::DRIVER_STATUS vdisplay_driver_status {VDISPLAY::DRIVER_STATUS::UNKNOWN};
+    std::optional<virtual_display_state_t> active_virtual_display;
+
+    void on_virtual_display_watchdog_failed() {
+      BOOST_LOG(error) << "Virtual display watchdog failed. Closing the SudoVDA driver handle."sv;
+      vdisplay_driver_status = VDISPLAY::DRIVER_STATUS::WATCHDOG_FAILED;
+      VDISPLAY::closeVDisplayDevice();
+    }
+
+    bool ensure_virtual_display_driver_ready() {
+      if (vdisplay_driver_status == VDISPLAY::DRIVER_STATUS::OK) {
+        return true;
+      }
+
+      vdisplay_driver_status = VDISPLAY::openVDisplayDevice();
+      if (vdisplay_driver_status != VDISPLAY::DRIVER_STATUS::OK) {
+        BOOST_LOG(warning) << "Virtual display driver is not ready. Status=" << static_cast<int>(vdisplay_driver_status);
+        return false;
+      }
+
+      if (!VDISPLAY::startPingThread(on_virtual_display_watchdog_failed)) {
+        on_virtual_display_watchdog_failed();
+        return false;
+      }
+
+      return true;
+    }
+
+    auto find_app(const std::vector<ctx_t> &apps, int app_id) {
+      return std::find_if(std::begin(apps), std::end(apps), [app_id](const auto &app) {
+        return app.id == std::to_string(app_id);
+      });
+    }
+
+    std::string sanitize_virtual_display_identity(std::string value, const std::string_view fallback) {
+      value.erase(std::remove_if(std::begin(value), std::end(value), [](unsigned char c) {
+        return !std::isalnum(c);
+      }),
+                  std::end(value));
+
+      if (value.empty()) {
+        value = fallback;
+      }
+
+      if (value.size() > 13) {
+        value.resize(13);
+      }
+
+      return value;
+    }
+
+    std::string_view to_string(rtsp_stream::virtual_display_mode_e mode) {
+      using enum rtsp_stream::virtual_display_mode_e;
+
+      switch (mode) {
+        case none:
+          return "none"sv;
+        case extend:
+          return "extend"sv;
+        case exclusive:
+          return "exclusive"sv;
+      }
+
+      return "unknown"sv;
+    }
+
+    std::optional<rtsp_stream::virtual_display_mode_e> resolve_virtual_display_mode(const ctx_t &app, const rtsp_stream::launch_session_t &launch_session) {
+      if (launch_session.virtual_display_mode.has_value()) {
+        if (*launch_session.virtual_display_mode == rtsp_stream::virtual_display_mode_e::none) {
+          return std::nullopt;
+        }
+
+        return launch_session.virtual_display_mode;
+      }
+
+      if (app.virtual_display) {
+        return rtsp_stream::virtual_display_mode_e::extend;
+      }
+
+      return std::nullopt;
+    }
+
+    std::optional<config::video_t::dd_t::config_option_e> resolve_virtual_display_configuration_override(const rtsp_stream::launch_session_t &launch_session) {
+      using config_option_e = config::video_t::dd_t::config_option_e;
+
+      if (!launch_session.virtual_display_mode.has_value()) {
+        return std::nullopt;
+      }
+
+      switch (*launch_session.virtual_display_mode) {
+        case rtsp_stream::virtual_display_mode_e::none:
+          return std::nullopt;
+        case rtsp_stream::virtual_display_mode_e::extend:
+          return config_option_e::ensure_active;
+        case rtsp_stream::virtual_display_mode_e::exclusive:
+          return config_option_e::ensure_only_display;
+      }
+
+      return std::nullopt;
+    }
+
+    std::string_view virtual_display_mode_identity_suffix(rtsp_stream::virtual_display_mode_e mode) {
+      using enum rtsp_stream::virtual_display_mode_e;
+
+      switch (mode) {
+        case none:
+          return "Off"sv;
+        case extend:
+          return "Ext"sv;
+        case exclusive:
+          return "Solo"sv;
+      }
+
+      return "Unk"sv;
+    }
+
+    uuid_util::uuid_t make_virtual_display_uuid(const ctx_t &app, rtsp_stream::virtual_display_mode_e mode) {
+      const auto mode_suffix {virtual_display_mode_identity_suffix(mode)};
+      uuid_util::uuid_t uuid {};
+      const auto seed_source {std::array {
+        calculate_crc32("sunshine-vdisplay-0|"s + app.id + "|"s + app.name + "|"s + app.cmd + "|"s + std::string {mode_suffix}),
+        calculate_crc32("sunshine-vdisplay-1|"s + app.id + "|"s + app.name + "|"s + app.cmd + "|"s + std::string {mode_suffix}),
+        calculate_crc32("sunshine-vdisplay-2|"s + app.id + "|"s + app.name + "|"s + app.cmd + "|"s + std::string {mode_suffix}),
+        calculate_crc32("sunshine-vdisplay-3|"s + app.id + "|"s + app.name + "|"s + app.cmd + "|"s + std::string {mode_suffix}),
+      }};
+
+      std::copy(std::begin(seed_source), std::end(seed_source), std::begin(uuid.b32));
+
+      uuid.b8[6] = static_cast<std::uint8_t>((uuid.b8[6] & 0x0F) | 0x40);
+      uuid.b8[8] = static_cast<std::uint8_t>((uuid.b8[8] & 0x3F) | 0x80);
+
+      return uuid;
+    }
+
+    uint32_t make_virtual_display_refresh_rate(const rtsp_stream::launch_session_t &launch_session) {
+      uint32_t refresh_rate = launch_session.fps > 0 ? static_cast<uint32_t>(launch_session.fps) : 60U;
+      if (refresh_rate < 1000) {
+        refresh_rate *= 1000;
+      }
+
+      return refresh_rate;
+    }
+
+    std::string wait_for_virtual_display_device_id(const std::string &display_name) {
+      auto retry_interval = 20ms;
+      while (retry_interval <= 640ms) {
+        const auto device_id {display_device::map_display_name(display_name)};
+        if (!device_id.empty()) {
+          return device_id;
+        }
+
+        std::this_thread::sleep_for(retry_interval);
+        retry_interval *= 2;
+      }
+
+      return {};
+    }
+
+    std::vector<std::string> enumerate_active_display_device_ids() {
+      const auto devices {display_device::enumerate_devices()};
+      std::vector<std::string> active_device_ids;
+      active_device_ids.reserve(devices.size());
+
+      for (const auto &device : devices) {
+        if (device.m_info.has_value()) {
+          active_device_ids.emplace_back(device.m_device_id);
+        }
+      }
+
+      return active_device_ids;
+    }
+
+    template<typename Range>
+    std::string format_virtual_display_device_ids(const Range &device_ids) {
+      std::string formatted {"["};
+      auto first = true;
+
+      for (const auto &device_id : device_ids) {
+        if (!first) {
+          formatted += ", ";
+        }
+
+        formatted += device_id;
+        first = false;
+      }
+
+      formatted += "]";
+      return formatted;
+    }
+
+    void restore_extended_virtual_display_topology(const std::vector<std::string> &previously_active_device_ids, const std::string &virtual_device_id) {
+      std::set<std::string> pending_devices;
+      for (const auto &device_id : previously_active_device_ids) {
+        if (!device_id.empty() && device_id != virtual_device_id) {
+          pending_devices.emplace(device_id);
+        }
+      }
+
+      if (pending_devices.empty()) {
+        return;
+      }
+
+      BOOST_LOG(info) << "Restoring extended display topology for virtual display ["sv << virtual_device_id << "] with previous active devices "sv << format_virtual_display_device_ids(previously_active_device_ids);
+
+      for (const auto &device_id : pending_devices) {
+        if (!display_device::ensure_device_active(device_id)) {
+          BOOST_LOG(warning) << "Failed to immediately reactivate display device ["sv << device_id << "] while preparing extended virtual display mode."sv;
+        }
+      }
+
+      auto retry_interval = 20ms;
+      while (retry_interval <= 640ms) {
+        const auto active_device_ids {enumerate_active_display_device_ids()};
+        for (auto it = std::begin(active_device_ids); it != std::end(active_device_ids); ++it) {
+          pending_devices.erase(*it);
+        }
+
+        if (pending_devices.empty()) {
+          BOOST_LOG(info) << "Extended virtual display topology restored successfully for ["sv << virtual_device_id << "]."sv;
+          return;
+        }
+
+        std::this_thread::sleep_for(retry_interval);
+        retry_interval *= 2;
+      }
+
+      BOOST_LOG(warning) << "Some previously active display devices did not reactivate in time for extended virtual display mode: "sv << format_virtual_display_device_ids(pending_devices);
+    }
+  }  // namespace
+#endif
 
   class deinit_t: public platf::deinit_t {
   public:
     ~deinit_t() {
       proc.terminate();
+#ifdef _WIN32
+      VDISPLAY::closeVDisplayDevice();
+#endif
     }
   };
 
@@ -137,7 +389,7 @@ namespace proc {
 
   int proc_t::execute(int app_id, std::shared_ptr<rtsp_stream::launch_session_t> launch_session) {
     // Ensure starting from a clean slate
-    terminate();
+    terminate(virtual_display_active());
 
     auto iter = std::find_if(_apps.begin(), _apps.end(), [&app_id](const auto app) {
       return app.id == std::to_string(app_id);
@@ -248,7 +500,7 @@ namespace proc {
     }
 
     if (_app.cmd.empty()) {
-      BOOST_LOG(info) << "Executing [Desktop]"sv;
+      BOOST_LOG(info) << "Executing desktop session for app ["sv << _app.name << "]"sv;
       placebo = true;
     } else {
       boost::filesystem::path working_dir = _app.working_dir.empty() ?
@@ -305,7 +557,7 @@ namespace proc {
     return 0;
   }
 
-  void proc_t::terminate() {
+  void proc_t::terminate(bool preserve_virtual_display) {
     std::error_code ec;
     placebo = false;
     terminate_process_group(_process, _process_group, _app.exit_timeout);
@@ -351,6 +603,10 @@ namespace proc {
       display_device::revert_configuration();
     }
 
+    if (!preserve_virtual_display) {
+      release_virtual_display();
+    }
+
     _app_id = -1;
   }
 
@@ -377,6 +633,154 @@ namespace proc {
 
   std::string proc_t::get_last_run_app_name() {
     return _app.name;
+  }
+
+  void proc_t::prepare_virtual_display(int app_id, const std::shared_ptr<rtsp_stream::launch_session_t> &launch_session) {
+#ifdef _WIN32
+    if (active_virtual_display) {
+      BOOST_LOG(info) << "Virtual display is already active; reusing the existing virtual display for app id ["sv << app_id << ']';
+      return;
+    }
+
+    const auto app_it {find_app(_apps, app_id)};
+    if (app_it == std::end(_apps)) {
+      BOOST_LOG(warning) << "Skipping virtual display setup because app id ["sv << app_id << "] could not be resolved."sv;
+      return;
+    }
+
+    const auto requested_mode {resolve_virtual_display_mode(*app_it, *launch_session)};
+    const auto has_client_preference {launch_session->virtual_display_mode.has_value()};
+    BOOST_LOG(info) << "Evaluating virtual display for app ["sv << app_it->name << "] (id ["sv << app_it->id << "], app_enabled="sv << (app_it->virtual_display ? "true"sv : "false"sv) << ", client_mode="sv << (has_client_preference ? to_string(*launch_session->virtual_display_mode) : "unset"sv) << ')';
+    if (!requested_mode.has_value()) {
+      return;
+    }
+
+    if (!ensure_virtual_display_driver_ready()) {
+      BOOST_LOG(warning) << "Skipping virtual display setup for ["sv << app_it->name << "] because the driver is unavailable."sv;
+      return;
+    }
+
+    if (!config::video.adapter_name.empty()) {
+      std::ignore = VDISPLAY::setRenderAdapterByName(utf_utils::from_utf8(config::video.adapter_name));
+    }
+
+    const auto mode {*requested_mode};
+    const auto previously_active_device_ids {mode == rtsp_stream::virtual_display_mode_e::extend ? enumerate_active_display_device_ids() : std::vector<std::string> {}};
+    const auto width {launch_session->width > 0 ? static_cast<uint32_t>(launch_session->width) : 1920U};
+    const auto height {launch_session->height > 0 ? static_cast<uint32_t>(launch_session->height) : 1080U};
+    const auto refresh_rate {make_virtual_display_refresh_rate(*launch_session)};
+    const auto monitor_uuid {make_virtual_display_uuid(*app_it, mode)};
+
+    GUID guid {};
+    std::memcpy(&guid, &monitor_uuid, sizeof(guid));
+
+    const auto device_name {sanitize_virtual_display_identity(app_it->name, "Sunshine"sv)};
+    const auto serial_number {sanitize_virtual_display_identity(app_it->id + std::string {virtual_display_mode_identity_suffix(mode)}, "VirtualDisp"sv)};
+    const auto display_name_w {VDISPLAY::createVirtualDisplay(serial_number.c_str(), device_name.c_str(), width, height, refresh_rate, guid)};
+    if (display_name_w.empty()) {
+      BOOST_LOG(warning) << "Virtual display creation failed for ["sv << app_it->name << "]. Falling back to the configured display."sv;
+      return;
+    }
+
+    std::ignore = VDISPLAY::changeDisplaySettings(display_name_w.c_str(), width, height, refresh_rate);
+
+    const auto display_name {utf_utils::to_utf8(display_name_w)};
+    const auto device_id {wait_for_virtual_display_device_id(display_name)};
+    if (device_id.empty()) {
+      BOOST_LOG(warning) << "Created virtual display ["sv << display_name << "] could not be mapped to a display device id. Removing it."sv;
+      std::ignore = VDISPLAY::removeVirtualDisplay(guid);
+      return;
+    }
+
+    virtual_display_state_t state;
+    state.initial_output_name = config::video.output_name;
+    state.initial_configuration_option = config::video.dd.configuration_option;
+    state.display_name = display_name;
+    state.device_id = device_id;
+    state.guid = guid;
+    active_virtual_display = std::move(state);
+
+    if (mode == rtsp_stream::virtual_display_mode_e::extend) {
+      restore_extended_virtual_display_topology(previously_active_device_ids, device_id);
+    }
+
+    config::video.output_name = device_id;
+    if (const auto configuration_override {resolve_virtual_display_configuration_override(*launch_session)}; configuration_override.has_value()) {
+      config::video.dd.configuration_option = *configuration_override;
+    }
+
+    BOOST_LOG(info) << "Prepared virtual display ["sv << display_name << "] mapped to device id ["sv << device_id << "] for app ["sv << app_it->name << "] using mode ["sv << to_string(mode) << ']';
+#else
+    std::ignore = app_id;
+    std::ignore = launch_session;
+#endif
+  }
+
+  bool proc_t::virtual_display_active() const {
+#ifdef _WIN32
+    return active_virtual_display.has_value();
+#else
+    return false;
+#endif
+  }
+
+  void proc_t::sync_virtual_display_hdr(const std::shared_ptr<rtsp_stream::launch_session_t> &launch_session) {
+#ifdef _WIN32
+    using hdr_option_e = config::video_t::dd_t::hdr_option_e;
+
+    if (!active_virtual_display || config::video.dd.hdr_option != hdr_option_e::automatic) {
+      return;
+    }
+
+    const auto display_name_w {utf_utils::from_utf8(active_virtual_display->display_name)};
+    const auto display_name {active_virtual_display->display_name};
+    const auto enable_hdr {launch_session->enable_hdr};
+    const auto hdr_toggle_delay {config::video.dd.wa.hdr_toggle_delay};
+
+    std::thread([display_name_w, display_name, enable_hdr, hdr_toggle_delay]() {
+      auto retry_interval = 200ms;
+      while (retry_interval <= 2s) {
+        if (enable_hdr && hdr_toggle_delay != std::chrono::milliseconds::zero()) {
+          std::ignore = VDISPLAY::setDisplayHDRByName(display_name_w.c_str(), false);
+          std::this_thread::sleep_for(hdr_toggle_delay);
+        }
+
+        if (VDISPLAY::setDisplayHDRByName(display_name_w.c_str(), enable_hdr)) {
+          BOOST_LOG(info) << "Applied HDR state ["sv << (enable_hdr ? "enabled"sv : "disabled"sv) << "] to virtual display ["sv << display_name << ']';
+          return;
+        }
+
+        std::this_thread::sleep_for(retry_interval);
+        retry_interval *= 2;
+      }
+
+      BOOST_LOG(warning) << "Failed to apply HDR state to virtual display ["sv << display_name << "] after waiting for the display to settle."sv;
+    }).detach();
+#else
+    std::ignore = launch_session;
+#endif
+  }
+
+  void proc_t::release_virtual_display() {
+#ifdef _WIN32
+    if (!active_virtual_display) {
+      return;
+    }
+
+    const auto state {*active_virtual_display};
+    config::video.output_name = state.initial_output_name;
+    config::video.dd.configuration_option = state.initial_configuration_option;
+
+    if (vdisplay_driver_status == VDISPLAY::DRIVER_STATUS::OK) {
+      if (!VDISPLAY::removeVirtualDisplay(state.guid)) {
+        BOOST_LOG(warning) << "Failed to remove virtual display ["sv << state.display_name << "]"sv;
+      }
+    } else {
+      BOOST_LOG(warning) << "Skipping virtual display removal because the driver is no longer available."sv;
+    }
+
+    active_virtual_display.reset();
+#endif
   }
 
   proc_t::~proc_t() {
@@ -649,6 +1053,7 @@ namespace proc {
         auto elevated = app_node.get_optional<bool>("elevated"s);
         auto auto_detach = app_node.get_optional<bool>("auto-detach"s);
         auto wait_all = app_node.get_optional<bool>("wait-all"s);
+        auto virtual_display = app_node.get_optional<bool>("virtual-display"s);
         auto exit_timeout = app_node.get_optional<int>("exit-timeout"s);
 
         std::vector<proc::cmd_t> prep_cmds;
@@ -718,6 +1123,7 @@ namespace proc {
         ctx.elevated = elevated.value_or(false);
         ctx.auto_detach = auto_detach.value_or(true);
         ctx.wait_all = wait_all.value_or(true);
+        ctx.virtual_display = virtual_display.value_or(false);
         ctx.exit_timeout = std::chrono::seconds {exit_timeout.value_or(5)};
 
         auto possible_ids = calculate_app_id(name, ctx.image_path, i++);

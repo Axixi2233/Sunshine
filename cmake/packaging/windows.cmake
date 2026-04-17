@@ -32,6 +32,14 @@ install(TARGETS audio-info RUNTIME DESTINATION "tools" COMPONENT audio)
 # Mandatory tools
 install(TARGETS sunshinesvc RUNTIME DESTINATION "tools" COMPONENT application)
 
+# Virtual display driver
+install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/drivers/sudovda"
+        DESTINATION "drivers"
+        COMPONENT virtual_display)
+install(TARGETS vddinstall
+        RUNTIME DESTINATION "drivers/sudovda"
+        COMPONENT virtual_display)
+
 # Mandatory scripts
 install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/misc/sunshine-setup.ps1"
         DESTINATION "scripts"
@@ -116,6 +124,11 @@ set(CPACK_COMPONENT_FIREWALL_GROUP "Scripts")
 set(CPACK_COMPONENT_GAMEPAD_DISPLAY_NAME "Virtual Gamepad")
 set(CPACK_COMPONENT_GAMEPAD_DESCRIPTION "ViGEmBus installer for virtual gamepad support.")
 set(CPACK_COMPONENT_GAMEPAD_GROUP "Scripts")
+
+# virtual display driver
+set(CPACK_COMPONENT_VIRTUAL_DISPLAY_DISPLAY_NAME "Virtual Display Driver")
+set(CPACK_COMPONENT_VIRTUAL_DISPLAY_DESCRIPTION "SudoVDA driver files for per-app virtual display support.")
+set(CPACK_COMPONENT_VIRTUAL_DISPLAY_GROUP "Drivers")
 
 # include specific packaging
 include(${CMAKE_MODULE_PATH}/packaging/windows_nsis.cmake)

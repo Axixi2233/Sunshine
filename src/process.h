@@ -9,6 +9,7 @@
 #endif
 
 // standard includes
+#include <memory>
 #include <optional>
 #include <unordered_map>
 
@@ -66,6 +67,7 @@ namespace proc {
     bool elevated;
     bool auto_detach;
     bool wait_all;
+    bool virtual_display {};
     std::chrono::seconds exit_timeout;
   };
 
@@ -95,7 +97,11 @@ namespace proc {
     std::vector<ctx_t> &get_apps();
     std::string get_app_image(int app_id);
     std::string get_last_run_app_name();
-    void terminate();
+    void prepare_virtual_display(int app_id, const std::shared_ptr<rtsp_stream::launch_session_t> &launch_session);
+    void sync_virtual_display_hdr(const std::shared_ptr<rtsp_stream::launch_session_t> &launch_session);
+    [[nodiscard]] bool virtual_display_active() const;
+    void release_virtual_display();
+    void terminate(bool preserve_virtual_display = false);
 
   private:
     int _app_id;

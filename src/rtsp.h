@@ -6,6 +6,8 @@
 
 // standard includes
 #include <atomic>
+#include <cstdint>
+#include <optional>
 
 // local includes
 #include "crypto.h"
@@ -13,6 +15,12 @@
 
 namespace rtsp_stream {
   constexpr auto RTSP_SETUP_PORT = 21;
+
+  enum class virtual_display_mode_e : std::uint8_t {
+    none = 0,
+    extend = 1,
+    exclusive = 2
+  };
 
   struct launch_session_t {
     uint32_t id;
@@ -39,6 +47,7 @@ namespace rtsp_stream {
     std::optional<crypto::cipher::gcm_t> rtsp_cipher;
     std::string rtsp_url_scheme;
     uint32_t rtsp_iv_counter;
+    std::optional<virtual_display_mode_e> virtual_display_mode;
   };
 
   void launch_session_raise(std::shared_ptr<launch_session_t> launch_session);
