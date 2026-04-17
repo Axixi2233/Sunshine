@@ -1,6 +1,6 @@
 <div align="center">
   <img src="sunshine.png"  alt="Sunshine icon"/>
-  <h1 align="center">Sunshine</h1>
+  <h1 align="center">日光·阿西西</h1>
   <h4 align="center">Self-hosted game stream host for Moonlight.</h4>
 </div>
 
