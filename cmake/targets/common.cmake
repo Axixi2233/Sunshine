@@ -77,6 +77,8 @@ add_custom_target(web-ui ALL
         COMMAND_EXPAND_LISTS
         VERBATIM)
 
+add_dependencies(sunshine web-ui)
+
 # docs
 if(BUILD_DOCS)
     add_subdirectory(third-party/doxyconfig docs)

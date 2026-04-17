@@ -5,7 +5,7 @@ import en from './public/assets/locale/en.json'
 
 export default async function() {
     let r = await (await fetch("./api/configLocale")).json();
-    let locale = r.locale ?? "en";
+    let locale = r.locale ?? "zh";
     document.querySelector('html').setAttribute('lang', locale);
     let messages = {
         en

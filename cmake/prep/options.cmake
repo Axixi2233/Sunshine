@@ -1,9 +1,9 @@
 # Publisher Metadata
 set(SUNSHINE_PUBLISHER_NAME "Third Party Publisher"
         CACHE STRING "The name of the publisher (not developer) of the application.")
-set(SUNSHINE_PUBLISHER_WEBSITE ""
+set(SUNSHINE_PUBLISHER_WEBSITE "https://axixi2233.github.io/"
         CACHE STRING "The URL of the publisher's website.")
-set(SUNSHINE_PUBLISHER_ISSUE_URL "https://app.lizardbyte.dev/support"
+set(SUNSHINE_PUBLISHER_ISSUE_URL "https://github.com/axixi2233/Sunshine/issues"
         CACHE STRING "The URL of the publisher's support site or issue tracker.
         If you provide a modified version of Sunshine, we kindly request that you use your own url.")
 

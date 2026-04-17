@@ -15,7 +15,7 @@ param(
 )
 
 # Constants
-$DocsUrl = "https://docs.lizardbyte.dev/projects/sunshine"
+$DocsUrl = "https://axixi2233.github.io/"
 
 # Set preference variables for output streams
 $InformationPreference = 'Continue'
@@ -447,7 +447,7 @@ if ($Action -eq "install") {
         -Color "Yellow"
     Write-Information ""
 
-    $totalSteps = 6
+    $totalSteps = 7
     $currentStep = 0
 
     # Reset permissions on the install directory
@@ -570,7 +570,20 @@ if ($Action -eq "install") {
         -Emoji "⚡"
     Write-Information ""
 
-    # 5. Configure autostart
+    # 5. Install virtual display driver
+    $currentStep++
+    Write-Progress `
+        -Activity "Installing Sunshine" `
+        -Status "Installing virtual display driver" `
+        -PercentComplete (($currentStep / $totalSteps) * 100)
+    $installVirtualDisplayScript = Join-Path $RootDir "drivers\sudovda\install.bat"
+    Invoke-ScriptIfExist `
+        -ScriptPath $installVirtualDisplayScript `
+        -Description "Installing virtual display driver" `
+        -Emoji "🖥️"
+    Write-Information ""
+
+    # 6. Configure autostart
     $currentStep++
     Write-Progress `
         -Activity "Installing Sunshine" `
@@ -609,7 +622,7 @@ if ($Action -eq "install") {
         -Color "Yellow"
     Write-Information ""
 
-    $totalSteps = 4
+    $totalSteps = 5
     $currentStep = 0
 
     # 1. Delete firewall rules
@@ -638,7 +651,20 @@ if ($Action -eq "install") {
         -Emoji "⚡"
     Write-Information ""
 
-    # 3. Restore NVIDIA preferences
+    # 3. Uninstall virtual display driver
+    $currentStep++
+    Write-Progress `
+        -Activity "Uninstalling Sunshine" `
+        -Status "Removing virtual display driver" `
+        -PercentComplete (($currentStep / $totalSteps) * 100)
+    $uninstallVirtualDisplayScript = Join-Path $RootDir "drivers\sudovda\uninstall.bat"
+    Invoke-ScriptIfExist `
+        -ScriptPath $uninstallVirtualDisplayScript `
+        -Description "Removing virtual display driver" `
+        -Emoji "🖥️"
+    Write-Information ""
+
+    # 4. Restore NVIDIA preferences
     $currentStep++
     Write-Progress `
         -Activity "Uninstalling Sunshine" `
@@ -650,7 +676,7 @@ if ($Action -eq "install") {
         -Emoji "🎮"
     Write-Information ""
 
-    # 4. Update PATH (remove)
+    # 5. Update PATH (remove)
     $currentStep++
     Write-Progress `
         -Activity "Uninstalling Sunshine" `

@@ -51,4 +51,5 @@ target_link_libraries(vddinstall
         newdev
         setupapi
         ${PLATFORM_LIBRARIES})
-target_compile_options(vddinstall PRIVATE ${SUNSHINE_COMPILE_OPTIONS})
+target_compile_options(vddinstall PRIVATE ${SUNSHINE_COMPILE_OPTIONS} -municode)
+target_link_options(vddinstall PRIVATE -municode)
