@@ -100,6 +100,8 @@
     "sort_by_name": "按名称排序",
     "sort_default": "默认顺序",
     "sort_descending": "降序",
+    "virtual_display": "在 Windows 上使用虚拟显示器",
+    "virtual_display_desc": "在 Sunshine 配置显示器和探测编码器之前，为这个应用创建一个专用的 SudoVDA 虚拟显示器。它适用于无头环境，或你希望让串流画面与物理显示器隔离的场景。",
     "wait_all": "继续串流直到所有应用进程退出",
     "wait_all_desc": "这将继续串流直到应用程序启动的所有进程终止。 当未选中时，串流将在初始应用进程终止时停止，即使其他应用进程仍在运行。",
     "working_dir": "工作目录",
@@ -455,7 +457,7 @@
     "vigembus_not_installed_title": "ViGEmBus 驱动程序未安装",
     "vigembus_outdated_desc": "您运行的是过时版本的 ViGEmBus (v{version})。需要 1.17 或更高版本才能正常支持游戏手柄。单击下面的按钮进行更新。",
     "vigembus_outdated_title": "ViGEmBus 驱动程序已过时",
-    "welcome": "你好，Sunshine！"
+    "welcome": "你好，Sunshine·阿西西！"
   },
   "navbar": {
     "applications": "应用程序",

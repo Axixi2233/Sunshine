@@ -313,8 +313,12 @@
           ? this.apps.filter(app => app.category === this.selectedCategory)
           : this.apps;
 
-        // Sort by official status first, then by GitHub stars
+        // Sort by axi-app first, then by official status, then by GitHub stars
         return filtered.slice().sort((a, b) => {
+          // axi-app entries first
+          if (a['axi-app'] && !b['axi-app']) return -1;
+          if (!a['axi-app'] && b['axi-app']) return 1;
+
           // Official apps first
           if (a.official && !b.official) return -1;
           if (!a.official && b.official) return 1;
@@ -342,7 +346,7 @@
           this.error = null;
 
           // Fetch the app directory for Sunshine
-          const indexUrl = 'https://app.lizardbyte.dev/app-directory/sunshine.json';
+          const indexUrl = 'https://axixi2233.github.io/res/config/sun/sunshine.json';
 
           const response = await fetch(indexUrl);
           if (!response.ok) {

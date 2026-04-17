@@ -27,7 +27,11 @@ class SunshineVersion {
     if (v.indexOf("v") === 0) {
       v = v.substring(1);
     }
-    return v.split('.').map(Number);
+    const match = v.match(/^(\d+)\.(\d+)\.(\d+)/);
+    if (!match) {
+      return null;
+    }
+    return match.slice(1, 4).map(Number);
   }
 
   isGreater(otherVersion) {

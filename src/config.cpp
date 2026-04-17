@@ -864,7 +864,7 @@ namespace config {
    * @brief Default top-level Sunshine configuration values used before file and CLI overrides.
    */
   sunshine_t sunshine {
-    "en",  // locale
+    "zh",  // locale
     2,  // min_log_level
     0,  // flags
     {},  // User file

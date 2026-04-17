@@ -26,7 +26,7 @@ if((DEFINED ENV{BRANCH}) AND (DEFINED ENV{BUILD_VERSION}))  # cmake-lint: disabl
         string(REGEX REPLACE "^v" "" PROJECT_VERSION ${PROJECT_VERSION})  # remove the v prefix if it exists
         set(CMAKE_PROJECT_VERSION ${PROJECT_VERSION})  # cpack will use this to set the binary versions
     endif()
-else()
+elseif(PROJECT_VERSION STREQUAL "0.0.0")
     # Generate Sunshine Version based of the git tag
     # https://github.com/nocnokneo/cmake-git-versioning-example/blob/master/LICENSE
     find_package(Git)
