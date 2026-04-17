@@ -47,3 +47,12 @@ target_link_libraries(sunshinesvc
         wtsapi32
         ${PLATFORM_LIBRARIES})
 target_compile_options(sunshinesvc PRIVATE ${SUNSHINE_COMPILE_OPTIONS})
+
+add_executable(vddinstall vddinstall.cpp)
+set_target_properties(vddinstall PROPERTIES CXX_STANDARD 23)
+target_link_libraries(vddinstall
+        cfgmgr32
+        newdev
+        setupapi
+        ${PLATFORM_LIBRARIES})
+target_compile_options(vddinstall PRIVATE ${SUNSHINE_COMPILE_OPTIONS})

@@ -27,6 +27,9 @@ extern "C" {
 #include "logging.h"
 #include "network.h"
 #include "platform/common.h"
+#ifdef _WIN32
+  #include "platform/windows/misc.h"
+#endif
 #include "process.h"
 #include "stream.h"
 #include "sync.h"
@@ -1424,8 +1427,19 @@ namespace stream {
           return;
         }
 
+#ifdef _WIN32
+        if (ec == boost::asio::error::connection_refused || ec == boost::asio::error::connection_reset) {
+          return;
+        }
+#endif
+
         if (ec || !bytes) {
-          BOOST_LOG(error) << "Couldn't receive data from udp socket: "sv << ec.message();
+#ifdef _WIN32
+          auto error_message = ec.category() == boost::system::system_category() ? platf::format_system_message(static_cast<DWORD>(ec.value())) : ec.message();
+#else
+          auto error_message = ec.message();
+#endif
+          BOOST_LOG(error) << "Couldn't receive data from udp socket ["sv << ec.value() << "]: "sv << error_message;
           return;
         }
 

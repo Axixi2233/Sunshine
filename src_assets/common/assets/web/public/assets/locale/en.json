@@ -100,6 +100,8 @@
     "sort_by_name": "Sort by Name",
     "sort_default": "Default order",
     "sort_descending": "Descending",
+    "virtual_display": "Use a virtual display on Windows",
+    "virtual_display_desc": "Create a dedicated SudoVDA virtual monitor for this app before Sunshine configures the display and probes encoders. This is useful for headless setups or when you want the stream isolated from physical monitors.",
     "wait_all": "Continue streaming until all app processes exit",
     "wait_all_desc": "This will continue streaming until all processes started by the app have terminated. When unchecked, streaming will stop when the initial app process exits, even if other app processes are still running.",
     "working_dir": "Working Directory",

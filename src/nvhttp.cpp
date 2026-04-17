@@ -394,6 +394,23 @@ namespace nvhttp {
     launch_session->gcmap = (int) util::from_view(get_arg(args, "gcmap", "0"));
     launch_session->enable_hdr = util::from_view(get_arg(args, "hdrMode", "0"));
 
+    if (auto virtual_display_it = args.find("virtualDisplay"s); virtual_display_it != std::end(args)) {
+      switch (util::from_view(virtual_display_it->second)) {
+        case 0:
+          launch_session->virtual_display_mode = rtsp_stream::virtual_display_mode_e::none;
+          break;
+        case 1:
+          launch_session->virtual_display_mode = rtsp_stream::virtual_display_mode_e::extend;
+          break;
+        case 2:
+          launch_session->virtual_display_mode = rtsp_stream::virtual_display_mode_e::exclusive;
+          break;
+        default:
+          BOOST_LOG(warning) << "Ignoring unsupported virtualDisplay value ["sv << virtual_display_it->second << "] from launch request."sv;
+          break;
+      }
+    }
+
     // Encrypted RTSP is enabled with client reported corever >= 1
     auto corever = util::from_view(get_arg(args, "corever", "0"));
     if (corever >= 1) {
@@ -1006,6 +1023,7 @@ namespace nvhttp {
 
       if (revert_display_configuration) {
         display_device::revert_configuration();
+        proc::proc.release_virtual_display();
       }
     });
 
@@ -1036,15 +1054,24 @@ namespace nvhttp {
 
     host_audio = util::from_view(get_arg(args, "localAudioPlayMode"));
     auto launch_session = make_launch_session(host_audio, args);
+    BOOST_LOG(info) << "Launch request received for app id ["sv << appid << ']';
 
     if (rtsp_stream::session_count() == 0) {
       // The display should be restored in case something fails as there are no other sessions.
       revert_display_configuration = true;
 
+      if (appid > 0) {
+        proc::proc.prepare_virtual_display(static_cast<int>(appid), launch_session);
+      }
+
       // We want to prepare display only if there are no active sessions at
       // the moment. This should be done before probing encoders as it could
       // change the active displays.
       display_device::configure_display(config::video, *launch_session);
+      if (proc::proc.virtual_display_active()) {
+        std::ignore = display_device::reset_persistence();
+        proc::proc.sync_virtual_display_hdr(launch_session);
+      }
 
       // Probe encoders again before streaming to ensure our chosen
       // encoder matches the active GPU (which could have changed
@@ -1157,6 +1184,9 @@ namespace nvhttp {
       // the moment. This should be done before probing encoders as it could
       // change the active displays.
       display_device::configure_display(config::video, *launch_session);
+      if (proc::proc.virtual_display_active()) {
+        std::ignore = display_device::reset_persistence();
+      }
 
       // Probe encoders again before streaming to ensure our chosen
       // encoder matches the active GPU (which could have changed
@@ -1226,6 +1256,7 @@ namespace nvhttp {
 
     // The config needs to be reverted regardless of whether "proc::proc.terminate()" was called or not.
     display_device::revert_configuration();
+    proc::proc.release_virtual_display();
   }
 
   /**

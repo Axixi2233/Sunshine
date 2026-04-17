@@ -13,6 +13,7 @@
 #endif
 
 // standard includes
+#include <memory>
 #include <optional>
 #include <unordered_map>
 
@@ -80,6 +81,7 @@ namespace proc {
     bool elevated;  ///< Whether the process should be launched elevated.
     bool auto_detach;  ///< Whether the process should detach automatically.
     bool wait_all;  ///< Whether Sunshine waits for all child processes.
+    bool virtual_display {};  ///< Whether this app should use a Windows virtual display by default.
     std::chrono::seconds exit_timeout;  ///< Exit timeout.
   };
 
@@ -147,9 +149,26 @@ namespace proc {
      */
     std::string get_last_run_app_name();
     /**
-     * @brief Terminate the launched application process.
+     * @brief Prepare a virtual display for a launch session when requested.
      */
-    void terminate();
+    void prepare_virtual_display(int app_id, const std::shared_ptr<rtsp_stream::launch_session_t> &launch_session);
+    /**
+     * @brief Apply the launch session HDR mode to the active virtual display.
+     */
+    void sync_virtual_display_hdr(const std::shared_ptr<rtsp_stream::launch_session_t> &launch_session);
+    /**
+     * @return Whether a virtual display is currently owned by Sunshine.
+     */
+    [[nodiscard]] bool virtual_display_active() const;
+    /**
+     * @brief Remove the active virtual display and restore display configuration.
+     */
+    void release_virtual_display();
+    /**
+     * @brief Terminate the launched application process.
+     * @param preserve_virtual_display Keep the current virtual display for a resumed session.
+     */
+    void terminate(bool preserve_virtual_display = false);
 
   private:
     int _app_id;

@@ -841,6 +841,47 @@ namespace display_device {
     return mapped_name;
   }
 
+  std::string map_display_name(const std::string &display_name) {
+    std::lock_guard lock {DD_DATA.mutex};
+    if (!DD_DATA.sm_instance) {
+      return {};
+    }
+
+    const auto devices {DD_DATA.sm_instance->execute([](auto &settings_iface) {
+      return settings_iface.enumAvailableDevices();
+    })};
+
+    for (const auto &device : devices) {
+      if (device.m_display_name == display_name) {
+        return device.m_device_id;
+      }
+    }
+
+    return {};
+  }
+
+  bool ensure_device_active(const std::string &device_id) {
+    std::lock_guard lock {DD_DATA.mutex};
+    if (!DD_DATA.sm_instance || device_id.empty()) {
+      return false;
+    }
+
+    const SingleDisplayConfiguration config {
+      device_id,
+      SingleDisplayConfiguration::DevicePreparation::EnsureActive,
+      std::nullopt,
+      std::nullopt,
+      std::nullopt
+    };
+
+    return DD_DATA.sm_instance->execute([&config](auto &settings_iface, auto &stop_token) {
+      using ApplyResult = SettingsManagerInterface::ApplyResult;
+
+      stop_token.requestStop();
+      return settings_iface.applySettings(config) == ApplyResult::Ok;
+    });
+  }
+
   void configure_display(const config::video_t &video_config, const rtsp_stream::launch_session_t &session) {
     const auto result {parse_configuration(video_config, session)};
     if (const auto *parsed_config {std::get_if<SingleDisplayConfiguration>(&result)}; parsed_config) {

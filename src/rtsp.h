@@ -6,6 +6,8 @@
 
 // standard includes
 #include <atomic>
+#include <cstdint>
+#include <optional>
 
 // local includes
 #include "crypto.h"
@@ -13,6 +15,15 @@
 
 namespace rtsp_stream {
   constexpr auto RTSP_SETUP_PORT = 21;  ///< GameStream base-port offset used for the RTSP setup listener.
+
+  /**
+   * @brief Client-requested virtual display behavior.
+   */
+  enum class virtual_display_mode_e : std::uint8_t {
+    none = 0,
+    extend = 1,
+    exclusive = 2
+  };
 
   /**
    * @brief RTSP launch session state shared with stream setup.
@@ -43,6 +54,7 @@ namespace rtsp_stream {
     std::string rtsp_url_scheme;  ///< URL scheme selected by the RTSP SETUP flow.
     uint32_t rtsp_iv_counter;  ///< Counter value mixed into encrypted RTSP IVs.
     std::string client_cert;  ///< PEM certificate for the paired Moonlight client.
+    std::optional<virtual_display_mode_e> virtual_display_mode;  ///< Client override for virtual display behavior.
   };
 
   /**

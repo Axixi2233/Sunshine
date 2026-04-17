@@ -16,6 +16,14 @@
 
 namespace platf {
   /**
+   * @brief Format a Windows status code as a UTF-8 system message.
+   *
+   * @param status Native status code returned by the platform API.
+   * @return Trimmed message, or an empty string if Windows cannot format it.
+   */
+  std::string format_system_message(DWORD status);
+
+  /**
    * @brief Write status details to the log.
    *
    * @param prefix Text prefix used when formatting the message.
