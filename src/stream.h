@@ -5,6 +5,9 @@
 #pragma once
 
 // standard includes
+#include <array>
+#include <cstdint>
+#include <optional>
 #include <utility>
 
 // lib includes
@@ -19,8 +22,14 @@ namespace stream {
   constexpr auto VIDEO_STREAM_PORT = 9;
   constexpr auto CONTROL_PORT = 10;
   constexpr auto AUDIO_STREAM_PORT = 11;
+  constexpr auto MIC_UPLINK_PORT = 12;
 
   struct session_t;
+
+  struct mic_uplink_info_t {
+    std::uint32_t session_id {};
+    std::array<std::uint8_t, 16> token {};
+  };
 
   struct config_t {
     audio::config_t audio;
@@ -52,4 +61,6 @@ namespace stream {
     void join(session_t &session);
     state_e state(session_t &session);
   }  // namespace session
+
+  std::optional<mic_uplink_info_t> request_mic_uplink(std::string_view unique_id);
 }  // namespace stream

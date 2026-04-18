@@ -497,9 +497,14 @@ namespace rtsp_stream {
      * @param launch_session Streaming session information.
      */
     void session_raise(std::shared_ptr<launch_session_t> launch_session) {
-      // If a launch event is still pending, don't overwrite it.
-      if (launch_event.view(0s)) {
-        return;
+      // We only support a single pending RTSP session. If a stale pending launch
+      // session is still present, replace it so the HTTP response and the RTSP
+      // handshake use the same launch_session_id/token pair.
+      if (auto pending_session = launch_event.view(0s); pending_session) {
+        BOOST_LOG(warning) << "Replacing pending RTSP launch session ["sv << pending_session->id
+                           << "] with ["sv << launch_session->id << ']';
+        raised_timer.cancel();
+        launch_event.pop();
       }
 
       // Raise the new launch session to prepare for the RTSP handshake

@@ -4,13 +4,17 @@
  */
 
 // standard includes
+#include <array>
+#include <deque>
 #include <fstream>
 #include <future>
+#include <mutex>
 #include <queue>
 
 // lib includes
 #include <boost/endian/arithmetic.hpp>
 #include <openssl/err.h>
+#include <opus/opus.h>
 
 extern "C" {
   // clang-format off
@@ -27,6 +31,7 @@ extern "C" {
 #include "logging.h"
 #include "network.h"
 #include "platform/common.h"
+#include "platform/mic_uplink.h"
 #ifdef _WIN32
   #include "platform/windows/misc.h"
 #endif
@@ -87,6 +92,8 @@ namespace stream {
     audio  ///< Audio
   };
 
+  constexpr std::uint8_t AXI_MIC_PAYLOAD_OPUS = 1;
+
 #pragma pack(push, 1)
 
   struct video_short_frame_header_t {
@@ -139,6 +146,20 @@ namespace stream {
 
   struct audio_packet_t {
     RTP_PACKET rtp;
+  };
+
+  struct axi_mic_packet_header_t {
+    boost::endian::big_uint32_at session_id;
+    boost::endian::big_uint32_at sequence;
+    boost::endian::big_uint32_at timestamp;
+    std::uint8_t token[16];
+    std::uint8_t payload_type;
+    std::uint8_t flags;
+    boost::endian::big_uint16_at payload_size;
+
+    const std::uint8_t *payload() const {
+      return reinterpret_cast<const std::uint8_t *>(this + 1);
+    }
   };
 
   struct control_header_v2 {
@@ -243,6 +264,7 @@ namespace stream {
   constexpr std::size_t MAX_AUDIO_PACKET_SIZE = 1400;
 
   using audio_aes_t = std::array<char, round_to_pkcs7_padded(MAX_AUDIO_PACKET_SIZE)>;
+  using opus_decoder_t = std::unique_ptr<OpusDecoder, decltype(&opus_decoder_destroy)>;
 
   using av_session_id_t = std::variant<asio::ip::address, std::string>;  // IP address or SS-Ping-Payload from RTSP handshake
   using message_queue_t = std::shared_ptr<safe::queue_t<std::pair<udp::endpoint, std::string>>>;
@@ -333,18 +355,21 @@ namespace stream {
     std::thread recv_thread;
     std::thread video_thread;
     std::thread audio_thread;
+    std::thread mic_thread;
     std::thread control_thread;
 
     asio::io_context io_context;
 
     udp::socket video_sock {io_context};
     udp::socket audio_sock {io_context};
+    udp::socket mic_sock {io_context};
 
     control_server_t control_server;
   };
 
   struct session_t {
     config_t config;
+    std::string unique_id;
 
     safe::mail_t mail;
 
@@ -406,6 +431,18 @@ namespace stream {
       platf::feedback_queue_t feedback_queue;
       safe::mail_raw_t::event_t<video::hdr_info_t> hdr_queue;
     } control;
+
+    struct {
+      bool enabled {false};
+      std::array<std::uint8_t, 16> token {};
+      opus_decoder_t decoder {nullptr, opus_decoder_destroy};
+      std::uint64_t raw_packet_count {};
+      std::uint64_t packet_count {};
+      std::uint32_t last_sequence {};
+      bool has_last_sequence {false};
+      bool invalid_packet_logged {false};
+      std::unique_ptr<platf::mic_uplink::sink_t> sink;
+    } mic;
 
     std::uint32_t launch_session_id;
 
@@ -1282,6 +1319,256 @@ namespace stream {
     }
   }
 
+  enum class mic_packet_validation_error_e {
+    none,
+    invalid_size,
+    invalid_payload_type,
+    invalid_token,
+  };
+
+  std::string mic_token_prefix_hex(const std::uint8_t *token, std::size_t count = 4) {
+    static constexpr auto lut = "0123456789ABCDEF";
+    std::string out;
+    out.reserve(count * 2);
+
+    for (std::size_t i = 0; i < count; ++i) {
+      const auto value = token[i];
+      out.push_back(lut[(value >> 4) & 0x0F]);
+      out.push_back(lut[value & 0x0F]);
+    }
+
+    return out;
+  }
+
+  void reset_mic_runtime_state(session_t &session) {
+    session.mic.raw_packet_count = 0;
+    session.mic.packet_count = 0;
+    session.mic.last_sequence = 0;
+    session.mic.has_last_sequence = false;
+    session.mic.invalid_packet_logged = false;
+  }
+
+  bool ensure_mic_uplink_initialized(session_t &session) {
+    if (!config::audio.mic_uplink) {
+      BOOST_LOG(info) << "Client microphone uplink request ignored because host support is disabled in configuration"sv;
+      return false;
+    }
+
+    if (!platf::mic_uplink::available(config::audio.mic_uplink_device)) {
+      BOOST_LOG(warning) << "Unable to initialize client microphone uplink playback device ["sv << config::audio.mic_uplink_device
+                         << "] because it is unavailable"sv;
+      return false;
+    }
+
+    if (!session.mic.decoder) {
+      int opus_status = OPUS_OK;
+      session.mic.decoder = opus_decoder_t {
+        opus_decoder_create(static_cast<opus_int32>(platf::mic_uplink::sample_rate), static_cast<int>(platf::mic_uplink::channels), &opus_status),
+        opus_decoder_destroy
+      };
+      if (opus_status != OPUS_OK || !session.mic.decoder) {
+        BOOST_LOG(warning) << "Unable to initialize client microphone uplink decoder: "sv << opus_strerror(opus_status);
+        session.mic.decoder.reset();
+        return false;
+      }
+    }
+
+    if (!session.mic.sink) {
+      session.mic.sink = platf::mic_uplink::create_sink(::config::audio.mic_uplink_device);
+      if (!session.mic.sink) {
+        BOOST_LOG(warning) << "Unable to initialize client microphone uplink playback device ["sv << ::config::audio.mic_uplink_device << "]"sv;
+        session.mic.decoder.reset();
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  bool enable_mic_uplink(session_t &session) {
+    RAND_bytes(session.mic.token.data(), static_cast<int>(session.mic.token.size()));
+    reset_mic_runtime_state(session);
+
+    if (!ensure_mic_uplink_initialized(session)) {
+      session.mic.enabled = false;
+      session.mic.token.fill(0);
+      return false;
+    }
+
+    session.mic.enabled = true;
+    BOOST_LOG(info) << "Client microphone uplink enabled for launch session ["sv << session.launch_session_id
+                    << "] tokenPrefix=["sv << mic_token_prefix_hex(session.mic.token.data()) << ']';
+    return true;
+  }
+
+  mic_packet_validation_error_e validate_mic_packet(const session_t &session, const axi_mic_packet_header_t &header, std::size_t bytes) {
+    const auto payload_size = static_cast<std::size_t>(header.payload_size);
+    if (payload_size == 0 || sizeof(header) + payload_size > bytes) {
+      return mic_packet_validation_error_e::invalid_size;
+    }
+
+    if (header.payload_type != AXI_MIC_PAYLOAD_OPUS) {
+      return mic_packet_validation_error_e::invalid_payload_type;
+    }
+
+    if (!std::equal(std::begin(header.token), std::end(header.token), std::begin(session.mic.token))) {
+      return mic_packet_validation_error_e::invalid_token;
+    }
+
+    return mic_packet_validation_error_e::none;
+  }
+
+  void decode_and_render_mic_audio(session_t &session, const axi_mic_packet_header_t &header) {
+    if (!session.mic.enabled || !session.mic.decoder || !session.mic.sink) {
+      return;
+    }
+
+    const auto sequence = static_cast<std::uint32_t>(header.sequence);
+    if (session.mic.has_last_sequence) {
+      const auto delta = sequence - session.mic.last_sequence;
+      if (delta > 1 && delta <= 5) {
+        std::array<opus_int16, platf::mic_uplink::sample_rate / 1000 * 120 * platf::mic_uplink::channels> concealment_buffer {};
+        for (std::uint32_t i = 1; i < delta; ++i) {
+          auto concealed_samples = opus_decode(session.mic.decoder.get(), nullptr, 0, concealment_buffer.data(), static_cast<int>(concealment_buffer.size() / platf::mic_uplink::channels), 0);
+          if (concealed_samples > 0) {
+            session.mic.sink->push_pcm(concealment_buffer.data(), static_cast<std::size_t>(concealed_samples), platf::mic_uplink::channels, platf::mic_uplink::sample_rate);
+          }
+        }
+      }
+    }
+
+    std::array<opus_int16, platf::mic_uplink::sample_rate / 1000 * 120 * platf::mic_uplink::channels> pcm_buffer {};
+    auto decoded_samples = opus_decode(
+      session.mic.decoder.get(),
+      header.payload(),
+      static_cast<opus_int32>(header.payload_size),
+      pcm_buffer.data(),
+      static_cast<int>(pcm_buffer.size() / platf::mic_uplink::channels),
+      0
+    );
+
+    if (decoded_samples < 0) {
+      BOOST_LOG(warning) << "Failed to decode client microphone uplink packet: "sv << opus_strerror(decoded_samples);
+      return;
+    }
+
+    if (decoded_samples > 0) {
+      session.mic.sink->push_pcm(pcm_buffer.data(), static_cast<std::size_t>(decoded_samples), platf::mic_uplink::channels, platf::mic_uplink::sample_rate);
+      session.mic.last_sequence = sequence;
+      session.mic.has_last_sequence = true;
+    }
+  }
+
+  void micUplinkThread(broadcast_ctx_t &ctx) {
+    auto shutdown_event = mail::man->event<bool>(mail::broadcast_shutdown);
+    boost::system::error_code ec;
+    udp::endpoint peer;
+    std::array<char, 2048> buffer {};
+    bool unknown_session_logged = false;
+    bool undersized_packet_logged = false;
+
+    platf::set_thread_name("stream::micUplink");
+
+    while (!shutdown_event->peek()) {
+      const auto bytes = ctx.mic_sock.receive_from(asio::buffer(buffer), peer, 0, ec);
+
+      if (shutdown_event->peek()) {
+        break;
+      }
+
+      if (ec) {
+        if (ec == boost::asio::error::operation_aborted || ec == boost::asio::error::bad_descriptor) {
+          break;
+        }
+
+        if (ec == boost::system::errc::connection_refused || ec == boost::system::errc::connection_reset) {
+          continue;
+        }
+
+#ifdef _WIN32
+        if (ec == boost::asio::error::connection_refused || ec == boost::asio::error::connection_reset) {
+          continue;
+        }
+#endif
+
+        BOOST_LOG(error) << "Couldn't receive client microphone uplink packet: "sv << ec.message();
+        continue;
+      }
+
+      if (bytes < sizeof(axi_mic_packet_header_t)) {
+        if (!undersized_packet_logged) {
+          BOOST_LOG(warning) << "Dropped undersized client microphone uplink packet from ["sv
+                             << peer.address().to_string() << ':' << peer.port() << "] with ["sv << bytes
+                             << "] bytes; expected at least ["sv << sizeof(axi_mic_packet_header_t) << ']';
+          undersized_packet_logged = true;
+        }
+        continue;
+      }
+
+      const auto &header = *reinterpret_cast<const axi_mic_packet_header_t *>(buffer.data());
+      const auto session_id = static_cast<std::uint32_t>(header.session_id);
+
+      auto lg = ctx.control_server._sessions.lock();
+      auto &sessions = *ctx.control_server._sessions;
+      auto it = std::find_if(sessions.begin(), sessions.end(), [session_id](const session_t *session) {
+        return session != nullptr && session->launch_session_id == session_id;
+      });
+
+      if (it == std::end(sessions) || *it == nullptr) {
+        if (!unknown_session_logged) {
+          BOOST_LOG(warning) << "Dropped client microphone uplink packet for unknown launch session ["sv << session_id
+                             << "] from ["sv << peer.address().to_string() << ':' << peer.port() << ']';
+          unknown_session_logged = true;
+        }
+        continue;
+      }
+
+      auto *session = *it;
+      if (session->mic.raw_packet_count == 0) {
+        BOOST_LOG(info) << "Received first raw client microphone uplink packet for launch session ["sv << session->launch_session_id
+                        << "] from ["sv << peer.address().to_string() << ':' << peer.port() << "] with ["sv << bytes << "] bytes";
+      }
+      ++session->mic.raw_packet_count;
+
+      const auto validation_error = validate_mic_packet(*session, header, bytes);
+      if (validation_error != mic_packet_validation_error_e::none) {
+        if (!session->mic.invalid_packet_logged) {
+          auto reason = "unknown"sv;
+          switch (validation_error) {
+            case mic_packet_validation_error_e::invalid_size:
+              reason = "invalid-size"sv;
+              break;
+            case mic_packet_validation_error_e::invalid_payload_type:
+              reason = "invalid-payload-type"sv;
+              break;
+            case mic_packet_validation_error_e::invalid_token:
+              reason = "invalid-token"sv;
+              break;
+            case mic_packet_validation_error_e::none:
+              break;
+          }
+
+          BOOST_LOG(warning) << "Dropped client microphone uplink packet for launch session ["sv << session->launch_session_id
+                             << "] from ["sv << peer.address().to_string() << ':' << peer.port() << "] because ["sv
+                             << reason << "] payloadType=["sv << static_cast<unsigned int>(header.payload_type)
+                             << "] payloadSize=["sv << static_cast<unsigned int>(header.payload_size)
+                             << "] bytes=["sv << bytes << "] expectedTokenPrefix=["sv
+                             << mic_token_prefix_hex(session->mic.token.data()) << "] receivedTokenPrefix=["sv
+                             << mic_token_prefix_hex(header.token) << ']';
+          session->mic.invalid_packet_logged = true;
+        }
+        continue;
+      }
+
+      if (session->mic.packet_count == 0) {
+        BOOST_LOG(info) << "Received first client microphone uplink packet for launch session ["sv << session->launch_session_id
+                        << "] from ["sv << peer.address().to_string() << ':' << peer.port() << ']';
+      }
+      ++session->mic.packet_count;
+      decode_and_render_mic_audio(*session, header);
+    }
+  }
+
   void videoBroadcastThread(udp::socket &sock) {
     auto shutdown_event = mail::man->event<bool>(mail::broadcast_shutdown);
     auto packets = mail::man->queue<video::packet_t>(mail::video_packets);
@@ -1717,6 +2004,7 @@ namespace stream {
     auto control_port = net::map_port(CONTROL_PORT);
     auto video_port = net::map_port(VIDEO_STREAM_PORT);
     auto audio_port = net::map_port(AUDIO_STREAM_PORT);
+    auto mic_port = net::map_port(MIC_UPLINK_PORT);
 
     if (ctx.control_server.bind(address_family, control_port)) {
       BOOST_LOG(error) << "Couldn't bind Control server to port ["sv << control_port << "], likely another process already bound to the port"sv;
@@ -1767,10 +2055,25 @@ namespace stream {
       return -1;
     }
 
+    ctx.mic_sock.open(protocol, ec);
+    if (ec) {
+      BOOST_LOG(fatal) << "Couldn't open socket for Mic Uplink server: "sv << ec.message();
+
+      return -1;
+    }
+
+    ctx.mic_sock.bind(udp::endpoint(bind_addr, mic_port), ec);
+    if (ec) {
+      BOOST_LOG(fatal) << "Couldn't bind Mic Uplink server to port ["sv << mic_port << "]: "sv << ec.message();
+
+      return -1;
+    }
+
     ctx.message_queue_queue = std::make_shared<message_queue_queue_t::element_type>(30);
 
     ctx.video_thread = std::thread {videoBroadcastThread, std::ref(ctx.video_sock)};
     ctx.audio_thread = std::thread {audioBroadcastThread, std::ref(ctx.audio_sock)};
+    ctx.mic_thread = std::thread {micUplinkThread, std::ref(ctx)};
     ctx.control_thread = std::thread {controlBroadcastThread, &ctx.control_server};
 
     ctx.recv_thread = std::thread {recvThread, std::ref(ctx)};
@@ -1795,6 +2098,7 @@ namespace stream {
 
     ctx.video_sock.close();
     ctx.audio_sock.close();
+    ctx.mic_sock.close();
 
     video_packets.reset();
     audio_packets.reset();
@@ -1805,6 +2109,8 @@ namespace stream {
     ctx.video_thread.join();
     BOOST_LOG(debug) << "Waiting for main audio thread to end..."sv;
     ctx.audio_thread.join();
+    BOOST_LOG(debug) << "Waiting for main microphone uplink thread to end..."sv;
+    ctx.mic_thread.join();
     BOOST_LOG(debug) << "Waiting for main control thread to end..."sv;
     ctx.control_thread.join();
     BOOST_LOG(debug) << "All broadcasting threads ended"sv;
@@ -1971,6 +2277,11 @@ namespace stream {
         platf::streaming_will_stop();
       }
 
+      if (session.mic.enabled && session.mic.packet_count == 0) {
+        BOOST_LOG(warning) << "No valid client microphone uplink packets were received for launch session ["sv
+                           << session.launch_session_id << "] rawPackets=["sv << session.mic.raw_packet_count << ']';
+      }
+
       BOOST_LOG(debug) << "Session ended"sv;
     }
 
@@ -2025,6 +2336,7 @@ namespace stream {
       session->launch_session_id = launch_session.id;
 
       session->config = config;
+      session->unique_id = launch_session.unique_id;
 
       session->control.connect_data = launch_session.control_connect_data;
       session->control.feedback_queue = mail->queue<platf::gamepad_feedback_msg_t>(mail::gamepad_feedback);
@@ -2080,6 +2392,20 @@ namespace stream {
       session->audio.sequenceNumber = 0;
       session->audio.timestamp = 0;
 
+      session->mic.enabled = false;
+      session->mic.token.fill(0);
+      reset_mic_runtime_state(*session);
+      if (launch_session.enable_mic_uplink) {
+        session->mic.token = launch_session.mic_uplink_token;
+        if (ensure_mic_uplink_initialized(*session)) {
+          session->mic.enabled = true;
+          BOOST_LOG(info) << "Client microphone uplink enabled for launch session ["sv << launch_session.id
+                          << "] tokenPrefix=["sv << mic_token_prefix_hex(session->mic.token.data()) << ']';
+        } else {
+          session->mic.token.fill(0);
+        }
+      }
+
       session->control.peer = nullptr;
       session->state.store(state_e::STOPPED, std::memory_order_relaxed);
 
@@ -2088,4 +2414,37 @@ namespace stream {
       return session;
     }
   }  // namespace session
+
+  std::optional<mic_uplink_info_t> request_mic_uplink(std::string_view unique_id) {
+    if (unique_id.empty()) {
+      return std::nullopt;
+    }
+
+    auto ref = broadcast.ref();
+    if (!ref) {
+      return std::nullopt;
+    }
+
+    auto lg = ref->control_server._sessions.lock();
+    auto &sessions = *ref->control_server._sessions;
+    auto it = std::find_if(sessions.rbegin(), sessions.rend(), [unique_id](const session_t *session) {
+      return session != nullptr &&
+             session->state.load(std::memory_order_relaxed) != session::state_e::STOPPED &&
+             session->unique_id == unique_id;
+    });
+
+    if (it == sessions.rend() || *it == nullptr) {
+      return std::nullopt;
+    }
+
+    auto *session = *it;
+    if (!enable_mic_uplink(*session)) {
+      return std::nullopt;
+    }
+
+    return mic_uplink_info_t {
+      .session_id = session->launch_session_id,
+      .token = session->mic.token,
+    };
+  }
 }  // namespace stream

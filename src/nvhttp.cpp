@@ -29,8 +29,10 @@
 #include "network.h"
 #include "nvhttp.h"
 #include "platform/common.h"
+#include "platform/mic_uplink.h"
 #include "process.h"
 #include "rtsp.h"
+#include "stream.h"
 #include "system_tray.h"
 #include "utility.h"
 #include "uuid.h"
@@ -41,6 +43,20 @@ using namespace std::literals;
 namespace nvhttp {
 
   static constexpr std::string_view EMPTY_PROPERTY_TREE_ERROR_MSG = "Property tree is empty. Probably, control flow got interrupted by an unexpected C++ exception. This is a bug in Sunshine. Moonlight-qt will report Malformed XML (missing root element)."sv;
+
+  std::string mic_token_prefix_hex(const std::uint8_t *token, std::size_t count = 4) {
+    static constexpr auto lut = "0123456789ABCDEF";
+    std::string out;
+    out.reserve(count * 2);
+
+    for (std::size_t i = 0; i < count; ++i) {
+      const auto value = token[i];
+      out.push_back(lut[(value >> 4) & 0x0F]);
+      out.push_back(lut[value & 0x0F]);
+    }
+
+    return out;
+  }
 
   namespace fs = std::filesystem;
   namespace pt = boost::property_tree;
@@ -286,6 +302,8 @@ namespace nvhttp {
     auto launch_session = std::make_shared<rtsp_stream::launch_session_t>();
 
     launch_session->id = ++session_id_counter;
+    launch_session->enable_mic_uplink = false;
+    launch_session->mic_uplink_token.fill(0);
 
     auto rikey = util::from_hex_vec(get_arg(args, "rikey"), true);
     std::copy(rikey.cbegin(), rikey.cend(), std::back_inserter(launch_session->gcm_key));
@@ -355,6 +373,38 @@ namespace nvhttp {
     auto prepend_iv_p = (uint8_t *) &prepend_iv;
     std::copy(prepend_iv_p, prepend_iv_p + sizeof(prepend_iv), std::begin(launch_session->iv));
     return launch_session;
+  }
+
+  void append_mic_uplink_response_fields(pt::ptree &tree, const rtsp_stream::launch_session_t &launch_session) {
+    if (!launch_session.enable_mic_uplink) {
+      return;
+    }
+
+    BOOST_LOG(info) << "Advertising client microphone uplink for launch session ["sv << launch_session.id
+                    << "] tokenPrefix=["sv << mic_token_prefix_hex(launch_session.mic_uplink_token.data()) << ']';
+
+    tree.put("root.axiMicEnabled", 1);
+    tree.put("root.axiMicPort", static_cast<int>(net::map_port(stream::MIC_UPLINK_PORT)));
+    tree.put("root.axiMicSessionId", launch_session.id);
+    tree.put("root.axiMicCodec", "opus");
+    tree.put("root.axiMicSampleRate", static_cast<int>(platf::mic_uplink::sample_rate));
+    tree.put("root.axiMicChannels", static_cast<int>(platf::mic_uplink::channels));
+    tree.put("root.axiMicFrameMs", static_cast<int>(platf::mic_uplink::frame_ms));
+    tree.put("root.axiMicToken", util::hex_vec(launch_session.mic_uplink_token, true));
+  }
+
+  void append_mic_uplink_response_fields(pt::ptree &tree, const stream::mic_uplink_info_t &mic_uplink_info) {
+    BOOST_LOG(info) << "Advertising client microphone uplink for launch session ["sv << mic_uplink_info.session_id
+                    << "] tokenPrefix=["sv << mic_token_prefix_hex(mic_uplink_info.token.data()) << ']';
+
+    tree.put("root.axiMicEnabled", 1);
+    tree.put("root.axiMicPort", static_cast<int>(net::map_port(stream::MIC_UPLINK_PORT)));
+    tree.put("root.axiMicSessionId", mic_uplink_info.session_id);
+    tree.put("root.axiMicCodec", "opus");
+    tree.put("root.axiMicSampleRate", static_cast<int>(platf::mic_uplink::sample_rate));
+    tree.put("root.axiMicChannels", static_cast<int>(platf::mic_uplink::channels));
+    tree.put("root.axiMicFrameMs", static_cast<int>(platf::mic_uplink::frame_ms));
+    tree.put("root.axiMicToken", util::hex_vec(mic_uplink_info.token, true));
   }
 
   void remove_session(const pair_session_t &sess) {
@@ -1047,6 +1097,43 @@ namespace nvhttp {
     rtsp_stream::launch_session_raise(launch_session);
   }
 
+  void microphone_uplink(resp_https_t response, req_https_t request) {
+    print_req<SunshineHTTPS>(request);
+
+    pt::ptree tree;
+    auto g = util::fail_guard([&]() {
+      std::ostringstream data;
+
+      if (tree.empty()) {
+        BOOST_LOG(error) << EMPTY_PROPERTY_TREE_ERROR_MSG;
+      }
+
+      pt::write_xml(data, tree);
+      response->write(data.str());
+      response->close_connection_after_response = true;
+    });
+
+    auto args = request->parse_query_string();
+    const auto unique_id = get_arg(args, "uniqueid");
+    if (unique_id.empty()) {
+      tree.put("root.<xmlattr>.status_code", 400);
+      tree.put("root.<xmlattr>.status_message", "Missing uniqueid parameter");
+      tree.put("root.axiMicEnabled", 0);
+      return;
+    }
+
+    const auto mic_uplink_info = stream::request_mic_uplink(unique_id);
+    if (!mic_uplink_info) {
+      tree.put("root.<xmlattr>.status_code", 404);
+      tree.put("root.<xmlattr>.status_message", "No active streaming session matched the requested uniqueid");
+      tree.put("root.axiMicEnabled", 0);
+      return;
+    }
+
+    tree.put("root.<xmlattr>.status_code", 200);
+    append_mic_uplink_response_fields(tree, *mic_uplink_info);
+  }
+
   void cancel(resp_https_t response, req_https_t request) {
     print_req<SunshineHTTPS>(request);
 
@@ -1201,6 +1288,7 @@ namespace nvhttp {
     https_server.resource["^/resume$"]["GET"] = [&host_audio](auto resp, auto req) {
       resume(host_audio, resp, req);
     };
+    https_server.resource["^/mic-uplink$"]["GET"] = microphone_uplink;
     https_server.resource["^/cancel$"]["GET"] = cancel;
 
     https_server.config.reuse_address = true;

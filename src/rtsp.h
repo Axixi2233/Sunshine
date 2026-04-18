@@ -5,6 +5,7 @@
 #pragma once
 
 // standard includes
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <optional>
@@ -43,6 +44,8 @@ namespace rtsp_stream {
     bool continuous_audio;
     bool enable_hdr;
     bool enable_sops;
+    bool enable_mic_uplink;
+    std::array<std::uint8_t, 16> mic_uplink_token;
 
     std::optional<crypto::cipher::gcm_t> rtsp_cipher;
     std::string rtsp_url_scheme;

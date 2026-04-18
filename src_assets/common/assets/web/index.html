@@ -51,6 +51,29 @@
       </div>
     </div>
 
+    <!-- VB-CABLE Warning -->
+    <div class="alert alert-warning my-4" v-if="platform === 'windows' && micUplinkEnabled && micUplinkStatus && !micUplinkStatus.available">
+      <div>
+        <div class="d-flex align-items-center mb-3">
+          <alert-triangle :size="32" class="icon-lg me-3"></alert-triangle>
+          <div>
+            <p class="mb-1"><strong>{{ $t('index.vbcable_not_installed_title') }}</strong></p>
+            <p class="mb-0">{{ $t('index.vbcable_not_installed_desc', { device: micUplinkStatus.device || 'CABLE Input' }) }}</p>
+          </div>
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+          <a class="btn btn-warning" :href="micUplinkStatus.download_url" target="_blank" rel="noopener noreferrer">
+            <download :size="18" class="icon"></download>
+            {{ $t('index.vbcable_download') }}
+          </a>
+          <a class="btn btn-outline-warning" :href="micUplinkStatus.official_url" target="_blank" rel="noopener noreferrer">
+            <external-link :size="18" class="icon"></external-link>
+            {{ $t('index.vbcable_official_site') }}
+          </a>
+        </div>
+      </div>
+    </div>
+
     <!-- Version -->
     <div class="card my-4">
       <div class="card-body" v-if="version">
@@ -141,7 +164,8 @@
     Package,
     Info,
     CheckCircle,
-    Download
+    Download,
+    ExternalLink
   } from 'lucide-vue-next'
 
   // Configure marked to allow HTML
@@ -165,9 +189,10 @@
       Wrench,
       Package,
       Info,
-      CheckCircle,
-      Download
-    },
+        CheckCircle,
+        Download,
+        ExternalLink
+      },
     data() {
       return {
         version: null,
@@ -179,6 +204,8 @@
         platform: "",
         controllerEnabled: false,
         vigembus: null,
+        micUplinkEnabled: false,
+        micUplinkStatus: null,
       }
     },
     async created() {
@@ -187,6 +214,7 @@
         this.notifyPreReleases = config.notify_pre_releases;
         this.platform = config.platform;
         this.controllerEnabled = config.controller !== "disabled";
+        this.micUplinkEnabled = config.mic_uplink !== false && config.mic_uplink !== "disabled";
         this.version = new SunshineVersion(null, config.version);
         console.log("Version: ", this.version.version)
         this.githubVersion = new SunshineVersion(await fetch(`${githubRepoApi}/releases/latest`).then((r) => r.json()), null);
@@ -200,6 +228,14 @@
             this.vigembus = await fetch("./api/vigembus/status").then((r) => r.json());
           } catch (e) {
             console.error("Failed to fetch ViGEmBus status:", e);
+          }
+        }
+
+        if (this.platform === 'windows' && this.micUplinkEnabled) {
+          try {
+            this.micUplinkStatus = await fetch("./api/mic-uplink/status").then((r) => r.json());
+          } catch (e) {
+            console.error("Failed to fetch mic uplink status:", e);
           }
         }
       } catch (e) {
