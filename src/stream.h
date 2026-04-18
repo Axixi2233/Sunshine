@@ -5,6 +5,10 @@
 #pragma once
 
 // standard includes
+#include <array>
+#include <cstdint>
+#include <optional>
+#include <string_view>
 #include <utility>
 
 // lib includes
@@ -19,8 +23,17 @@ namespace stream {
   constexpr auto VIDEO_STREAM_PORT = 9;  ///< GameStream base-port offset used for the video UDP stream.
   constexpr auto CONTROL_PORT = 10;  ///< GameStream base-port offset used for the control channel.
   constexpr auto AUDIO_STREAM_PORT = 11;  ///< GameStream base-port offset used for the audio UDP stream.
+  constexpr auto MIC_UPLINK_PORT = 12;  ///< GameStream base-port offset used for microphone uplink UDP packets.
 
   struct session_t;
+
+  /**
+   * @brief Connection details returned when a client enables microphone uplink.
+   */
+  struct mic_uplink_info_t {
+    std::uint32_t session_id {};
+    std::array<std::uint8_t, 16> token {};
+  };
 
   /**
    * @brief Stream configuration shared by capture and network senders.
@@ -95,4 +108,6 @@ namespace stream {
      */
     const std::string &client_cert(session_t &session);
   }  // namespace session
+
+  std::optional<mic_uplink_info_t> request_mic_uplink(std::string_view unique_id, std::string_view client_cert);
 }  // namespace stream

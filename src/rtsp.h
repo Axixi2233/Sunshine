@@ -5,6 +5,7 @@
 #pragma once
 
 // standard includes
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <optional>

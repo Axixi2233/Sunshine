@@ -74,6 +74,7 @@ namespace upnp {
       auto rtsp = std::to_string(net::map_port(rtsp_stream::RTSP_SETUP_PORT));
       auto video = std::to_string(net::map_port(stream::VIDEO_STREAM_PORT));
       auto audio = std::to_string(net::map_port(stream::AUDIO_STREAM_PORT));
+      auto mic = std::to_string(net::map_port(stream::MIC_UPLINK_PORT));
       auto control = std::to_string(net::map_port(stream::CONTROL_PORT));
       auto gs_http = std::to_string(net::map_port(nvhttp::PORT_HTTP));
       auto gs_https = std::to_string(net::map_port(nvhttp::PORT_HTTPS));
@@ -83,6 +84,7 @@ namespace upnp {
         {{rtsp, rtsp, "TCP"s}, "Sunshine - RTSP"s},
         {{video, video, "UDP"s}, "Sunshine - Video"s},
         {{audio, audio, "UDP"s}, "Sunshine - Audio"s},
+        {{mic, mic, "UDP"s}, "Sunshine - Mic Uplink"s},
         {{control, control, "UDP"s}, "Sunshine - Control"s},
         {{gs_http, gs_http, "TCP"s}, "Sunshine - Client HTTP"s},
         {{gs_https, gs_https, "TCP"s}, "Sunshine - Client HTTPS"s},

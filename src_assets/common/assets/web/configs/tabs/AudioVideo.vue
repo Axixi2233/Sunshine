@@ -64,6 +64,21 @@ const config = ref(props.config)
                   v-model="config.install_steam_audio_drivers"
                   default="true"
         ></Checkbox>
+
+        <!-- Client Microphone Uplink -->
+        <Checkbox class="mb-3"
+                  id="mic_uplink"
+                  locale-prefix="config"
+                  v-model="config.mic_uplink"
+                  default="true"
+        ></Checkbox>
+
+        <div class="mb-3">
+          <label for="mic_uplink_device" class="form-label">{{ $t('config.mic_uplink_device') }}</label>
+          <input type="text" class="form-control" id="mic_uplink_device" :placeholder="$t('config.mic_uplink_device_placeholder')"
+                 v-model="config.mic_uplink_device" />
+          <div class="form-text">{{ $t('config.mic_uplink_device_desc') }}</div>
+        </div>
       </template>
     </PlatformLayout>
 

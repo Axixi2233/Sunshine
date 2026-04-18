@@ -40,6 +40,7 @@
 #include "network.h"
 #include "nvhttp.h"
 #include "platform/common.h"
+#include "platform/mic_uplink.h"
 #include "process.h"
 #include "rtsp.h"
 #include "utility.h"
@@ -1559,6 +1560,67 @@ namespace confighttp {
   }
 
   /**
+   * @brief Get VB-CABLE availability for client microphone uplink.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   *
+   * @api_examples{/api/mic-uplink/status| GET| null}
+   */
+  void getMicUplinkStatus(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+
+    print_req(request);
+
+    nlohmann::json output_tree;
+    output_tree["enabled"] = config::audio.mic_uplink;
+    output_tree["device"] = config::audio.mic_uplink_device;
+    output_tree["download_url"] = "https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip";
+    output_tree["official_url"] = "https://vb-audio.com/Cable/";
+
+#ifdef _WIN32
+    output_tree["available"] = platf::mic_uplink::available(config::audio.mic_uplink_device);
+#else
+    output_tree["available"] = false;
+    output_tree["error"] = "Client microphone uplink is only available on Windows";
+#endif
+
+    send_response(response, output_tree);
+  }
+
+  /**
+   * @brief Get the currently available display devices.
+   * @param response The HTTP response object.
+   * @param request The HTTP request object.
+   *
+   * @api_examples{/api/display-devices| GET| null}
+   */
+  void getDisplayDevices(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+
+    print_req(request);
+
+    nlohmann::json output_tree;
+    output_tree["status"] = true;
+    output_tree["devices"] = nlohmann::json::array();
+
+    for (const auto &device : display_device::enumerate_devices()) {
+      nlohmann::json device_tree;
+      device_tree["device_id"] = device.m_device_id;
+      device_tree["display_name"] = device.m_display_name;
+      device_tree["friendly_name"] = device.m_friendly_name;
+      device_tree["active"] = device.m_info.has_value();
+      device_tree["primary"] = device.m_info ? device.m_info->m_primary : false;
+      output_tree["devices"].push_back(std::move(device_tree));
+    }
+
+    send_response(response, output_tree);
+  }
+
+  /**
    * @brief Checks whether a directory entry qualifies as an executable file.
    * @param entry The directory entry to check.
    * @param status The cached file status for the entry.
@@ -1814,6 +1876,8 @@ namespace confighttp {
     server.resource["^/api/restart$"]["POST"] = restart;
     server.resource["^/api/vigembus/status$"]["GET"] = getViGEmBusStatus;
     server.resource["^/api/vigembus/install$"]["POST"] = installViGEmBus;
+    server.resource["^/api/mic-uplink/status$"]["GET"] = getMicUplinkStatus;
+    server.resource["^/api/display-devices$"]["GET"] = getDisplayDevices;
 
     // static/dynamic resources
     server.resource["^/images/sunshine.ico$"]["GET"] = getFaviconImage;
