@@ -11,7 +11,7 @@
                   <BookOpen :size="18" class="icon"></BookOpen>
                   {{ $t('resource_card.documentation') }}
                 </a>
-                <a class="btn btn-primary" href="https://axixi2233.github.io/" target="_blank">
+                <a class="btn btn-primary" href="https://www.axixi.top/" target="_blank">
                   <Globe :size="18" class="icon"></Globe>
                   个人空间·阿西西
                 </a>

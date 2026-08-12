@@ -15,7 +15,7 @@ param(
 )
 
 # Constants
-$DocsUrl = "https://axixi2233.github.io/"
+$DocsUrl = "https://www.axixi.top/"
 
 # Set preference variables for output streams
 $InformationPreference = 'Continue'

@@ -73,7 +73,7 @@ namespace system_tray {
   }
 
   void tray_credits_cb([[maybe_unused]] struct tray_menu *item) {
-    platf::open_url("https://axixi2233.github.io/credits.html");
+    platf::open_url("https://www.axixi.top/credits.html");
   }
 
   /**
