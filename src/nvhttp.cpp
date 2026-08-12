@@ -453,7 +453,7 @@ namespace nvhttp {
   }
 
   void append_mic_uplink_response_fields(pt::ptree &tree, const stream::mic_uplink_info_t &mic_uplink_info) {
-    BOOST_LOG(info) << "Advertising client microphone uplink for launch session ["sv << mic_uplink_info.session_id
+    BOOST_LOG(info) << "Advertising client microphone uplink for active session ["sv << mic_uplink_info.session_id
                     << "] tokenPrefix=["sv << mic_token_prefix_hex(mic_uplink_info.token.data()) << ']';
 
     tree.put("root.axiMicEnabled", 1);
