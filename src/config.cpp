@@ -850,11 +850,13 @@ namespace config {
       platf::supported_gamepads(nullptr).front().name.size(),
     },  // Default gamepad
     true,  // back as touchpad click enabled (manual DS4 only)
+    false,  // back as touchpad click disabled for DualSense
     true,  // client gamepads with motion events are emulated as DS4
     true,  // client gamepads with touchpads are emulated as DS4
     true,  // ds5_inputtino_randomize_mac
 
     true,  // keyboard enabled
+    false,  // right Alt to Windows key disabled
     true,  // mouse enabled
     true,  // controller enabled
     true,  // always send scancodes
@@ -1794,6 +1796,7 @@ namespace config {
 
     string_restricted_f(vars, "gamepad"s, input.gamepad, get_supported_gamepad_options());
     bool_f(vars, "ds4_back_as_touchpad_click", input.ds4_back_as_touchpad_click);
+    bool_f(vars, "ds5_back_as_touchpad_click", input.ds5_back_as_touchpad_click);
     bool_f(vars, "motion_as_ds4", input.motion_as_ds4);
     bool_f(vars, "touchpad_as_ds4", input.touchpad_as_ds4);
     bool_f(vars, "ds5_inputtino_randomize_mac", input.ds5_inputtino_randomize_mac);
@@ -2035,8 +2038,14 @@ namespace config {
         WaitForSingleObject(shell_exec_info.hProcess, INFINITE);
         CloseHandle(shell_exec_info.hProcess);
 
-        // Wait for the UI to be ready for connections
-        service_ctrl::wait_for_ui_ready();
+      }
+
+      // The Start Menu shortcut is the user-facing entry point for an installed build.
+      // Open the Web UI after the service is ready, including when it was already running.
+      if (service_ctrl::wait_for_ui_ready()) {
+        launch_ui(std::nullopt);
+      } else {
+        BOOST_LOG(error) << "Sunshine service started, but the Web UI did not become ready."sv;
       }
 
       // Always return 1 to ensure Sunshine doesn't start normally

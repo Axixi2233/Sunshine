@@ -33,6 +33,14 @@ install(TARGETS audio-info RUNTIME DESTINATION "tools" COMPONENT audio)
 
 # Mandatory tools
 install(TARGETS sunshinesvc RUNTIME DESTINATION "tools" COMPONENT application)
+if(HIDMAESTRO_HOST_EXECUTABLE)
+    install(PROGRAMS "${HIDMAESTRO_HOST_EXECUTABLE}" DESTINATION "tools" COMPONENT application)
+    install(FILES
+            "${HIDMAESTRO_LICENSE_FILE}"
+            "${HIDMAESTRO_NOTICES_FILE}"
+            DESTINATION "licenses/HIDMaestro"
+            COMPONENT application)
+endif()
 
 # Virtual display driver
 install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/drivers/sudovda"

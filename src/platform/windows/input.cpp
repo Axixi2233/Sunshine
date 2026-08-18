@@ -25,6 +25,7 @@
 #include <ViGEm/Client.h>
 
 // local includes
+#include "hidmaestro_client.h"
 #include "keylayout.h"
 #include "misc.h"
 #include "src/config.h"
@@ -502,9 +503,11 @@ namespace platf {
    */
   struct input_raw_t {
     ~input_raw_t() {
+      delete hidmaestro;
       delete vigem;
     }
 
+    hidmaestro::client_t *hidmaestro;  ///< HIDMaestro DualSense helper client.
     vigem_t *vigem;  ///< Vigem.
 
     decltype(CreateSyntheticPointerDevice) *fnCreateSyntheticPointerDevice;  ///< Fn create synthetic pointer device.
@@ -516,10 +519,21 @@ namespace platf {
     input_t result {new input_raw_t {}};
     auto &raw = *(input_raw_t *) result.get();
 
-    raw.vigem = new vigem_t {};
-    if (raw.vigem->init()) {
-      delete raw.vigem;
-      raw.vigem = nullptr;
+    // Keep the configured backend eager for Web UI diagnostics. The other backend is
+    // initialized on demand when a compatible Moonlight client explicitly overrides it.
+    if (config::input.gamepad != "ds5"sv) {
+      raw.vigem = new vigem_t {};
+      if (raw.vigem->init()) {
+        delete raw.vigem;
+        raw.vigem = nullptr;
+      }
+    }
+    if (config::input.gamepad == "ds5"sv) {
+      raw.hidmaestro = new hidmaestro::client_t {};
+      if (raw.hidmaestro->init()) {
+        delete raw.hidmaestro;
+        raw.hidmaestro = nullptr;
+      }
     }
 
     // Get pointers to virtual touch/pen input functions (Win10 1809+)
@@ -1239,18 +1253,65 @@ namespace platf {
 
   int alloc_gamepad(input_t &input, const gamepad_id_t &id, const gamepad_arrival_t &metadata, feedback_queue_t feedback_queue) {
     auto raw = (input_raw_t *) input.get();
+    const auto client_preference = gamepad_emulation_from_capabilities(metadata.capabilities);
+    const auto selected_emulation = resolve_gamepad_emulation(client_preference, config::input.gamepad);
+    const auto selection_source = client_preference == gamepad_emulation_e::automatic ? "host selection"sv : "client override"sv;
+
+    if (selected_emulation == gamepad_emulation_e::ds5) {
+      if (!raw->hidmaestro) {
+        raw->hidmaestro = new hidmaestro::client_t {};
+        if (raw->hidmaestro->init()) {
+          delete raw->hidmaestro;
+          raw->hidmaestro = nullptr;
+        }
+      }
+      if (!raw->hidmaestro || !raw->hidmaestro->available()) {
+        BOOST_LOG(error) << "Gamepad " << id.globalIndex << " requested DualSense emulation, but HIDMaestro is unavailable"sv;
+        return -1;
+      }
+      BOOST_LOG(info) << "Gamepad " << id.globalIndex << " will be DualSense controller ("sv << selection_source << ')';
+      BOOST_LOG(info) << "Gamepad " << id.globalIndex << " client metadata: type="sv << static_cast<unsigned>(metadata.type)
+                      << ", capabilities="sv << util::hex(metadata.capabilities).to_string_view()
+                      << ", supported buttons="sv << util::hex(metadata.supportedButtons).to_string_view();
+      if (!(metadata.capabilities & (LI_CCAP_ACCEL | LI_CCAP_GYRO))) {
+        BOOST_LOG(warning) << "Gamepad " << id.globalIndex << " is emulating a DualSense controller, but the client gamepad doesn't have motion sensors active"sv;
+      }
+      if (!(metadata.capabilities & LI_CCAP_TOUCHPAD)) {
+        BOOST_LOG(warning) << "Gamepad " << id.globalIndex << " is emulating a DualSense controller, but the client gamepad doesn't have a touchpad"sv;
+      }
+      const bool enable_native_pcm = (metadata.capabilities & LI_CCAP_HAPTIC_PCM) != 0;
+      BOOST_LOG(info) << "Gamepad " << id.globalIndex << (enable_native_pcm ? " requested native DualSense PCM"sv : " did not advertise native DualSense PCM; using the standard profile"sv);
+      return raw->hidmaestro->alloc_gamepad(id, std::move(feedback_queue), enable_native_pcm);
+    }
+
+    if (raw->hidmaestro && raw->hidmaestro->has_gamepad(id.globalIndex)) {
+      raw->hidmaestro->free_gamepad(id.globalIndex);
+    }
 
     if (!raw->vigem) {
-      return 0;
+      raw->vigem = new vigem_t {};
+      if (raw->vigem->init()) {
+        delete raw->vigem;
+        raw->vigem = nullptr;
+      }
     }
+    if (!raw->vigem) {
+      BOOST_LOG(error) << "Gamepad " << id.globalIndex << " requested ViGEm emulation, but ViGEm is unavailable"sv;
+      return -1;
+    }
+
+    // HIDMaestro requests motion reports too. Stop any stale requests before
+    // replacing a DualSense with a ViGEm-backed controller in the same slot.
+    feedback_queue->raise(gamepad_feedback_msg_t::make_motion_event_state(id.clientRelativeIndex, LI_MOTION_TYPE_ACCEL, 0));
+    feedback_queue->raise(gamepad_feedback_msg_t::make_motion_event_state(id.clientRelativeIndex, LI_MOTION_TYPE_GYRO, 0));
 
     VIGEM_TARGET_TYPE selectedGamepadType;
 
-    if (config::input.gamepad == "x360"sv) {
-      BOOST_LOG(info) << "Gamepad " << id.globalIndex << " will be Xbox 360 controller (manual selection)"sv;
+    if (selected_emulation == gamepad_emulation_e::x360) {
+      BOOST_LOG(info) << "Gamepad " << id.globalIndex << " will be Xbox 360 controller ("sv << selection_source << ')';
       selectedGamepadType = Xbox360Wired;
-    } else if (config::input.gamepad == "ds4"sv) {
-      BOOST_LOG(info) << "Gamepad " << id.globalIndex << " will be DualShock 4 controller (manual selection)"sv;
+    } else if (selected_emulation == gamepad_emulation_e::ds4) {
+      BOOST_LOG(info) << "Gamepad " << id.globalIndex << " will be DualShock 4 controller ("sv << selection_source << ')';
       selectedGamepadType = DualShock4Wired;
     } else if (metadata.type == LI_CTYPE_PS) {
       BOOST_LOG(info) << "Gamepad " << id.globalIndex << " will be DualShock 4 controller (auto-selected by client-reported type)"sv;
@@ -1291,8 +1352,17 @@ namespace platf {
     return raw->vigem->alloc_gamepad_internal(id, feedback_queue, selectedGamepadType);
   }
 
-  void free_gamepad(input_t &input, int nr) {
+  void free_gamepad(input_t &input, int nr, bool retain_device) {
     auto raw = (input_raw_t *) input.get();
+
+    if (raw->hidmaestro && raw->hidmaestro->has_gamepad(nr)) {
+      if (retain_device) {
+        raw->hidmaestro->detach_gamepad(nr);
+      } else {
+        raw->hidmaestro->free_gamepad(nr);
+      }
+      return;
+    }
 
     if (!raw->vigem) {
       return;
@@ -1552,7 +1622,12 @@ namespace platf {
    * @param gamepad_state The gamepad button/axis state sent from the client.
    */
   void gamepad_update(input_t &input, int nr, const gamepad_state_t &gamepad_state) {
-    auto vigem = ((input_raw_t *) input.get())->vigem;
+    auto raw = (input_raw_t *) input.get();
+    if (raw->hidmaestro && raw->hidmaestro->owns_gamepad(nr)) {
+      raw->hidmaestro->update(nr, gamepad_state, config::input.ds5_back_as_touchpad_click);
+      return;
+    }
+    auto vigem = raw->vigem;
 
     // If there is no gamepad support
     if (!vigem) {
@@ -1584,7 +1659,12 @@ namespace platf {
    * @param touch The touch event.
    */
   void gamepad_touch(input_t &input, const gamepad_touch_t &touch) {
-    auto vigem = ((input_raw_t *) input.get())->vigem;
+    auto raw = (input_raw_t *) input.get();
+    if (raw->hidmaestro && raw->hidmaestro->owns_gamepad(touch.id.globalIndex)) {
+      raw->hidmaestro->touch(touch);
+      return;
+    }
+    auto vigem = raw->vigem;
 
     // If there is no gamepad support
     if (!vigem) {
@@ -1690,7 +1770,12 @@ namespace platf {
    * @param motion The motion event.
    */
   void gamepad_motion(input_t &input, const gamepad_motion_t &motion) {
-    auto vigem = ((input_raw_t *) input.get())->vigem;
+    auto raw = (input_raw_t *) input.get();
+    if (raw->hidmaestro && raw->hidmaestro->owns_gamepad(motion.id.globalIndex)) {
+      raw->hidmaestro->motion(motion);
+      return;
+    }
+    auto vigem = raw->vigem;
 
     // If there is no gamepad support
     if (!vigem) {
@@ -1717,7 +1802,12 @@ namespace platf {
    * @param battery The battery event.
    */
   void gamepad_battery(input_t &input, const gamepad_battery_t &battery) {
-    auto vigem = ((input_raw_t *) input.get())->vigem;
+    auto raw = (input_raw_t *) input.get();
+    if (raw->hidmaestro && raw->hidmaestro->owns_gamepad(battery.id.globalIndex)) {
+      raw->hidmaestro->battery(battery);
+      return;
+    }
+    auto vigem = raw->vigem;
 
     // If there is no gamepad support
     if (!vigem) {
@@ -1796,21 +1886,29 @@ namespace platf {
         supported_gamepad_t {"auto", true, ""},
         supported_gamepad_t {"x360", false, ""},
         supported_gamepad_t {"ds4", false, ""},
+        supported_gamepad_t {"ds5", false, ""},
       };
 
       return gps;
     }
 
-    auto vigem = ((input_raw_t *) input)->vigem;
-    auto enabled = vigem != nullptr;
-    auto reason = enabled ? "" : "gamepads.vigem-not-available";
+    auto raw = (input_raw_t *) input;
+    auto vigem_enabled = raw->vigem != nullptr;
+    auto hidmaestro_enabled = raw->hidmaestro != nullptr && raw->hidmaestro->available();
+    auto vigem_reason = vigem_enabled ? "" : "gamepads.vigem-not-available";
+    auto hidmaestro_reason = hidmaestro_enabled ? "" : "gamepads.hidmaestro-not-available";
 
     // ds4 == ps4
     static std::vector gps {
-      supported_gamepad_t {"auto", true, reason},
-      supported_gamepad_t {"x360", enabled, reason},
-      supported_gamepad_t {"ds4", enabled, reason}
+      supported_gamepad_t {"auto", true, ""},
+      supported_gamepad_t {"x360", false, ""},
+      supported_gamepad_t {"ds4", false, ""},
+      supported_gamepad_t {"ds5", false, ""}
     };
+
+    gps[1] = supported_gamepad_t {"x360", vigem_enabled, vigem_reason};
+    gps[2] = supported_gamepad_t {"ds4", vigem_enabled, vigem_reason};
+    gps[3] = supported_gamepad_t {"ds5", hidmaestro_enabled, hidmaestro_reason};
 
     for (auto &[name, is_enabled, reason_disabled] : gps) {
       if (!is_enabled) {

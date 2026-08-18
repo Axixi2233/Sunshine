@@ -1687,8 +1687,10 @@ namespace video {
 
       auto status = disp->capture(push_captured_image_callback, pull_free_image_callback, &display_cursor);
 
+      bool reinit_from_display_switch = false;
       if (artificial_reinit && status != platf::capture_e::error) {
         status = platf::capture_e::reinit;
+        reinit_from_display_switch = true;
 
         artificial_reinit = false;
       }
@@ -1696,6 +1698,10 @@ namespace video {
       switch (status) {
         case platf::capture_e::reinit:
           {
+            const auto reinit_started_at = std::chrono::steady_clock::now();
+            BOOST_LOG(warning) << "Video capture reinitialization started [source="sv
+                               << (reinit_from_display_switch ? "display-switch"sv : "capture-backend"sv)
+                               << ", display="sv << display_names[display_p] << ']';
             reinit_event.raise(true);
 
             // Some classes of images contain references to the display --> display won't delete unless img is deleted
@@ -1746,11 +1752,15 @@ namespace video {
               }
             }
             if (!disp) {
+              BOOST_LOG(error) << "Video capture reinitialization failed because no display capture backend could be created"sv;
               return;
             }
 
             display_wp = disp;
 
+            const auto reinit_duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - reinit_started_at);
+            BOOST_LOG(info) << "Video capture reinitialization completed [display="sv << display_names[display_p]
+                            << ", duration="sv << reinit_duration.count() << "ms]"sv;
             reinit_event.reset();
             continue;
           }

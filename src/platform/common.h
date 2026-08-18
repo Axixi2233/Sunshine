@@ -5,11 +5,15 @@
 #pragma once
 
 // standard includes
+#include <algorithm>
+#include <array>
 #include <bitset>
 #include <filesystem>
 #include <functional>
 #include <mutex>
+#include <span>
 #include <string>
+#include <string_view>
 
 // lib includes
 #include <boost/core/noncopyable.hpp>
@@ -75,6 +79,59 @@ namespace nvenc {
 namespace platf {
   // Limited by bits in activeGamepadMask
   constexpr auto MAX_GAMEPADS = 16;  ///< Maximum number of simultaneously tracked gamepads.
+  constexpr std::size_t MAX_GAMEPAD_HAPTIC_PCM_BYTES = 3920;  ///< Maximum native controller PCM bytes carried by one feedback message.
+
+  /**
+   * @brief Client-requested host virtual gamepad type.
+   */
+  enum class gamepad_emulation_e {
+    automatic,  ///< Let the host configuration and controller metadata select the type.
+    x360,  ///< Force an Xbox 360 virtual controller.
+    ds4,  ///< Force a DualShock 4 virtual controller.
+    ds5,  ///< Force a DualSense virtual controller.
+  };
+
+  /**
+   * @brief Decode the virtual gamepad preference from controller arrival capabilities.
+   *
+   * @param capabilities Controller arrival capability flags.
+   * @return Requested virtual gamepad type.
+   */
+  constexpr gamepad_emulation_e gamepad_emulation_from_capabilities(std::uint16_t capabilities) {
+    switch (capabilities & LI_CCAP_EMULATION_MASK) {
+      case LI_CCAP_EMULATION_X360:
+        return gamepad_emulation_e::x360;
+      case LI_CCAP_EMULATION_DS4:
+        return gamepad_emulation_e::ds4;
+      case LI_CCAP_EMULATION_DS5:
+        return gamepad_emulation_e::ds5;
+      default:
+        return gamepad_emulation_e::automatic;
+    }
+  }
+
+  /**
+   * @brief Resolve the virtual gamepad type requested by client and host settings.
+   *
+   * @param client_preference Explicit client preference, or automatic.
+   * @param host_gamepad Host gamepad configuration value.
+   * @return Resolved preference, which remains automatic when both sides use automatic selection.
+   */
+  constexpr gamepad_emulation_e resolve_gamepad_emulation(gamepad_emulation_e client_preference, std::string_view host_gamepad) {
+    if (client_preference != gamepad_emulation_e::automatic) {
+      return client_preference;
+    }
+    if (host_gamepad == "x360") {
+      return gamepad_emulation_e::x360;
+    }
+    if (host_gamepad == "ds4") {
+      return gamepad_emulation_e::ds4;
+    }
+    if (host_gamepad == "ds5") {
+      return gamepad_emulation_e::ds5;
+    }
+    return gamepad_emulation_e::automatic;
+  }
 
   constexpr std::uint32_t DPAD_UP = 0x0001;  ///< Moonlight gamepad button mask bit for D-pad up.
   constexpr std::uint32_t DPAD_DOWN = 0x0002;  ///< Moonlight gamepad button mask bit for D-pad down.
@@ -116,6 +173,8 @@ namespace platf {
     set_motion_event_state,  ///< Set motion event state
     set_rgb_led,  ///< Set RGB LED
     set_adaptive_triggers,  ///< Set adaptive triggers
+    set_player_indicator,  ///< Set DualSense player-indicator LEDs
+    controller_haptic_pcm,  ///< Native multi-channel controller audio/haptics PCM
   };
 
   /**
@@ -189,6 +248,21 @@ namespace platf {
     }
 
     /**
+     * @brief Create a DualSense player-indicator command.
+     *
+     * @param id Controller identifier.
+     * @param value Raw five-bit player-indicator mask.
+     * @return Constructed player-indicator message.
+     */
+    static gamepad_feedback_msg_t make_player_indicator(std::uint16_t id, std::uint8_t value) {
+      gamepad_feedback_msg_t msg;
+      msg.type = gamepad_feedback_e::set_player_indicator;
+      msg.id = id;
+      msg.data.player_indicator.value = value;
+      return msg;
+    }
+
+    /**
      * @brief Create adaptive triggers.
      *
      * @param id Identifier for the controller, session, display, or resource.
@@ -204,6 +278,30 @@ namespace platf {
       msg.type = gamepad_feedback_e::set_adaptive_triggers;
       msg.id = id;
       msg.data.adaptive_triggers = {.event_flags = event_flags, .type_left = type_left, .type_right = type_right, .left = left, .right = right};
+      return msg;
+    }
+
+    /**
+     * @brief Create a native controller audio/haptics PCM message.
+     *
+     * @param id Controller identifier.
+     * @param sequence Rolling PCM window sequence number.
+     * @param sample_rate PCM sample rate in Hz.
+     * @param channels Interleaved PCM channel count.
+     * @param bits_per_sample Bits stored for each PCM sample.
+     * @param pcm Interleaved little-endian PCM bytes.
+     * @return Constructed native PCM message.
+     */
+    static gamepad_feedback_msg_t make_controller_haptic_pcm(std::uint16_t id, std::uint16_t sequence, std::uint32_t sample_rate, std::uint8_t channels, std::uint8_t bits_per_sample, std::span<const std::uint8_t> pcm) {
+      gamepad_feedback_msg_t msg;
+      msg.type = gamepad_feedback_e::controller_haptic_pcm;
+      msg.id = id;
+      msg.data.controller_haptic_pcm.sequence = sequence;
+      msg.data.controller_haptic_pcm.sample_rate = sample_rate;
+      msg.data.controller_haptic_pcm.size = static_cast<std::uint16_t>(std::min(pcm.size(), MAX_GAMEPAD_HAPTIC_PCM_BYTES));
+      msg.data.controller_haptic_pcm.channels = channels;
+      msg.data.controller_haptic_pcm.bits_per_sample = bits_per_sample;
+      std::copy_n(pcm.begin(), msg.data.controller_haptic_pcm.size, msg.data.controller_haptic_pcm.pcm.begin());
       return msg;
     }
 
@@ -233,6 +331,10 @@ namespace platf {
       } rgb_led;
 
       struct {
+        std::uint8_t value;
+      } player_indicator;
+
+      struct {
         uint16_t controllerNumber;
         uint8_t event_flags;
         uint8_t type_left;
@@ -240,6 +342,15 @@ namespace platf {
         std::array<uint8_t, 10> left;
         std::array<uint8_t, 10> right;
       } adaptive_triggers;
+
+      struct {
+        std::uint32_t sample_rate;
+        std::uint16_t sequence;
+        std::uint16_t size;
+        std::uint8_t channels;
+        std::uint8_t bits_per_sample;
+        std::array<std::uint8_t, MAX_GAMEPAD_HAPTIC_PCM_BYTES> pcm;
+      } controller_haptic_pcm;
     } data;  ///< Controller feedback payload for the selected feedback type.
   };
 
@@ -1231,8 +1342,9 @@ namespace platf {
    *
    * @param input Platform input backend that receives the event.
    * @param nr Controller index assigned by the client.
+   * @param retain_device Whether a backend may preserve the OS device for a same-session reconnect.
    */
-  void free_gamepad(input_t &input, int nr);
+  void free_gamepad(input_t &input, int nr, bool retain_device = false);
 
   /**
    * @brief Get the supported platform capabilities to advertise to the client.

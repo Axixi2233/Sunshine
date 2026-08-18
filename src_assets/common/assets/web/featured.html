@@ -345,8 +345,8 @@
           this.loading = true;
           this.error = null;
 
-          // Fetch the app directory for Sunshine
-          const indexUrl = 'https://www.axixi.top/res/config/sun/sunshine.json';
+          // Fetch the app directory from the CORS-enabled GitHub Pages origin.
+          const indexUrl = 'https://axixi2233.github.io/res/config/sun/sunshine.json';
 
           const response = await fetch(indexUrl);
           if (!response.ok) {

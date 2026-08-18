@@ -1,5 +1,7 @@
 # windows specific dependencies
 
+include("${CMAKE_MODULE_PATH}/dependencies/hidmaestro.cmake")
+
 # MinHook setup - use installed minhook for AMD64, otherwise download minhook-detours for ARM64
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64")
     # Make sure MinHook is installed for x86/x64

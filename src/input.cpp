@@ -165,12 +165,15 @@ namespace input {
    *
    * @param platf_input Platf input.
    * @param id Identifier for the controller, session, display, or resource.
+   * @param retain_device Whether the platform may keep the OS device for a same-session reconnect.
    */
-  void free_gamepad(platf::input_t &platf_input, int id) {
+  void free_gamepad(platf::input_t &platf_input, int id, bool retain_device = false) {
     platf::gamepad_update(platf_input, id, platf::gamepad_state_t {});
-    platf::free_gamepad(platf_input, id);
+    platf::free_gamepad(platf_input, id, retain_device);
 
-    free_id(gamepadMask, id);
+    if (!retain_device) {
+      free_id(gamepadMask, id);
+    }
   }
 
   /**
@@ -181,13 +184,15 @@ namespace input {
         gamepad_state {},
         back_timeout_id {},
         id {-1},
+        retained_id {-1},
         back_button_state {button_state_e::NONE} {
     }
 
     ~gamepad_t() {
-      if (id >= 0) {
-        task_pool.push([id = this->id]() {
-          free_gamepad(platf_input, id);
+      const auto allocated_id = id >= 0 ? id : retained_id;
+      if (allocated_id >= 0) {
+        task_pool.push([allocated_id]() {
+          free_gamepad(platf_input, allocated_id);
         });
       }
     }
@@ -197,6 +202,8 @@ namespace input {
     thread_pool_util::ThreadPool::task_id_t back_timeout_id;  ///< Back timeout ID.
 
     int id;  ///< Global gamepad slot assigned to this client controller.
+
+    int retained_id;  ///< Detached global slot whose OS device may be reused by this stream.
 
     // When emulating the HOME button, we may need to artificially release the back button.
     // Afterwards, the gamepad state on sunshine won't match the state on Moonlight.
@@ -1061,7 +1068,8 @@ namespace input {
       return;
     }
 
-    if (input->gamepads[packet->controllerNumber].id >= 0) {
+    auto &gamepad = input->gamepads[packet->controllerNumber];
+    if (gamepad.id >= 0) {
       BOOST_LOG(warning) << "ControllerNumber already allocated ["sv << packet->controllerNumber << ']';
       return;
     }
@@ -1072,18 +1080,24 @@ namespace input {
       util::endian::little(packet->supportedButtonFlags),
     };
 
-    auto id = alloc_id(gamepadMask);
+    const bool reusing_id = gamepad.retained_id >= 0;
+    const auto id = reusing_id ? gamepad.retained_id : alloc_id(gamepadMask);
     if (id < 0) {
       return;
     }
 
     // Allocate a new gamepad
     if (platf::alloc_gamepad(platf_input, {id, packet->controllerNumber}, arrival, input->feedback_queue)) {
+      if (reusing_id) {
+        platf::free_gamepad(platf_input, id);
+        gamepad.retained_id = -1;
+      }
       free_id(gamepadMask, id);
       return;
     }
 
-    input->gamepads[packet->controllerNumber].id = id;
+    gamepad.id = id;
+    gamepad.retained_id = -1;
   }
 
   /**
@@ -1332,20 +1346,27 @@ namespace input {
     // If this is an event for a new gamepad, create the gamepad now. Ideally, the client would
     // send a controller arrival instead of this but it's still supported for legacy clients.
     if ((packet->activeGamepadMask & (1 << packet->controllerNumber)) && gamepad.id < 0) {
-      auto id = alloc_id(gamepadMask);
+      const bool reusing_id = gamepad.retained_id >= 0;
+      const auto id = reusing_id ? gamepad.retained_id : alloc_id(gamepadMask);
       if (id < 0) {
         return;
       }
 
       if (platf::alloc_gamepad(platf_input, {id, (uint8_t) packet->controllerNumber}, {}, input->feedback_queue)) {
+        if (reusing_id) {
+          platf::free_gamepad(platf_input, id);
+          gamepad.retained_id = -1;
+        }
         free_id(gamepadMask, id);
         return;
       }
 
       gamepad.id = id;
+      gamepad.retained_id = -1;
     } else if (!(packet->activeGamepadMask & (1 << packet->controllerNumber)) && gamepad.id >= 0) {
-      // If this is the final event for a gamepad being removed, free the gamepad and return.
-      free_gamepad(platf_input, gamepad.id);
+      // Preserve backends that support stable device identity until this stream ends.
+      free_gamepad(platf_input, gamepad.id, true);
+      gamepad.retained_id = gamepad.id;
       gamepad.id = -1;
       return;
     }

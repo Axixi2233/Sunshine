@@ -37,6 +37,7 @@ typedef enum _D3DKMT_GPU_PREFERENCE_QUERY_STATE : DWORD {
   D3DKMT_GPU_PREFERENCE_STATE_USER_SPECIFIED_GPU  ///< A specific GPU is preferred.
 } D3DKMT_GPU_PREFERENCE_QUERY_STATE;  ///< Alias for D3 DKMT GPU PREFERENCE QUERY STATE.
 
+#include "capture_diagnostics.h"
 #include "display.h"
 #include "misc.h"
 #include "src/config.h"
@@ -164,8 +165,13 @@ namespace platf::dxgi {
       case DXGI_ERROR_WAIT_TIMEOUT:
         return capture_e::timeout;
       case WAIT_ABANDONED:
+        BOOST_LOG(warning) << "Desktop Duplication requested capture reinitialization while acquiring a frame [reason=WAIT_ABANDONED, status=0x"sv << util::hex(status).to_string_view() << ']';
+        return capture_e::reinit;
       case DXGI_ERROR_ACCESS_LOST:
+        BOOST_LOG(warning) << "Desktop Duplication requested capture reinitialization while acquiring a frame [reason=DXGI_ERROR_ACCESS_LOST, status=0x"sv << util::hex(status).to_string_view() << ']';
+        return capture_e::reinit;
       case DXGI_ERROR_ACCESS_DENIED:
+        BOOST_LOG(warning) << "Desktop Duplication requested capture reinitialization while acquiring a frame [reason=DXGI_ERROR_ACCESS_DENIED, status=0x"sv << util::hex(status).to_string_view() << ']';
         return capture_e::reinit;
       default:
         BOOST_LOG(error) << "Couldn't acquire next frame [0x"sv << util::hex(status).to_string_view();
@@ -197,6 +203,7 @@ namespace platf::dxgi {
         return capture_e::ok;
 
       case DXGI_ERROR_ACCESS_LOST:
+        BOOST_LOG(warning) << "Desktop Duplication requested capture reinitialization while releasing a frame [reason=DXGI_ERROR_ACCESS_LOST, status=0x"sv << util::hex(status).to_string_view() << ']';
         return capture_e::reinit;
 
       default:
@@ -237,6 +244,7 @@ namespace platf::dxgi {
     DXGI_RATIONAL client_frame_rate_adjusted = adjust_client_frame_rate();
     std::optional<std::chrono::steady_clock::time_point> frame_pacing_group_start;
     uint32_t frame_pacing_group_frames = 0;
+    capture_stall_tracker_t capture_stall_tracker {1s, 5s};
 
     // Keep the display awake during capture. If the display goes to sleep during
     // capture, best case is that capture stops until it powers back on. However,
@@ -254,6 +262,11 @@ namespace platf::dxgi {
       // display or GPU changes. We should reinit to examine the updated state of
       // the display subsystem. It is recommended to call this once per frame.
       if (!factory->IsCurrent()) {
+        if (const auto stall_duration = capture_stall_tracker.active_duration(std::chrono::steady_clock::now())) {
+          BOOST_LOG(warning) << "DXGI factory became stale after ["sv << stall_duration->count() << "ms] without a new desktop frame; reinitializing display capture"sv;
+        } else {
+          BOOST_LOG(warning) << "DXGI factory became stale; reinitializing display capture to refresh adapter and output state"sv;
+        }
         return platf::capture_e::reinit;
       }
 
@@ -322,6 +335,17 @@ namespace platf::dxgi {
           // while each time we reach our max frame timeout. This will only happen when nothing
           // is updating the display, so no visible stutter should be introduced by the sleep.
           std::this_thread::sleep_for(10ms);
+        }
+      }
+
+      const auto capture_diagnostic_time = std::chrono::steady_clock::now();
+      if (status == platf::capture_e::timeout) {
+        if (const auto stall_duration = capture_stall_tracker.on_timeout(capture_diagnostic_time)) {
+          BOOST_LOG(info) << "Desktop capture has not produced a new frame for ["sv << stall_duration->count() << "ms]; this can be normal while the desktop is static"sv;
+        }
+      } else if (status == platf::capture_e::ok && img_out) {
+        if (const auto stall_duration = capture_stall_tracker.on_frame(capture_diagnostic_time)) {
+          BOOST_LOG(info) << "Desktop capture produced a new frame after ["sv << stall_duration->count() << "ms] without updates"sv;
         }
       }
 

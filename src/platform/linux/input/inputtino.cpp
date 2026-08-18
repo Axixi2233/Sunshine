@@ -114,7 +114,8 @@ namespace platf {
   /**
    * @brief Release gamepad resources.
    */
-  void free_gamepad(input_t &input, int nr) {
+  void free_gamepad(input_t &input, int nr, bool retain_device) {
+    (void) retain_device;
     auto raw = (input_raw_t *) input.get();
     platf::gamepad::free(raw, nr);
   }

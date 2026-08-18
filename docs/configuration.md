@@ -316,7 +316,9 @@ editing the `conf` file in a text editor. Use the examples as reference.
     <tr>
         <td>Description</td>
         <td colspan="2">
-            The type of gamepad to emulate on the host.
+            The type of gamepad to emulate on the host. A compatible Moonlight client can explicitly request
+            Xbox 360, DualShock 4, or DualSense for an individual streaming session. An explicit client request
+            takes precedence over this setting; the client automatic mode continues to use this setting.
         </td>
     </tr>
     <tr>
@@ -339,8 +341,18 @@ editing the `conf` file in a text editor. Use the examples as reference.
     </tr>
     <tr>
         <td>ds5</td>
-        <td>DualShock 5 controller (PS5)
-            @note{This option applies to FreeBSD and Linux only.}</td>
+        <td>DualSense controller (PS5)
+            @note{This option applies to FreeBSD, Linux, and Windows. On Windows, Sunshine uses the bundled
+            HIDMaestro helper to create a USB DualSense. The helper installs or verifies its driver when Sunshine
+            starts, so the Sunshine process must have administrator privileges. DualSense lightbar, player-indicator,
+            adaptive-trigger, touch, and motion forwarding also require matching support in the Moonlight client.
+            When a client advertises native controller PCM support, Sunshine selects HIDMaestro's full composite
+            DualSense profile and forwards the game's authored 4-channel, 48 kHz, 16-bit USB audio/haptics stream.
+            During a streaming session, Sunshine preserves the Windows virtual DualSense identity while the client
+            changes physical controllers so games can keep their open HID and controller-audio handles.
+            Composite creation can install the bundled USB/IP backend on first use and may therefore require one
+            elevated run. If composite creation fails, Sunshine logs the reason and falls back to the standard
+            DualSense profile without native PCM.}</td>
     </tr>
     <tr>
         <td>switch</td>
@@ -380,6 +392,31 @@ editing the `conf` file in a text editor. Use the examples as reference.
         <td>Example</td>
         <td colspan="2">@code{}
             ds4_back_as_touchpad_click = enabled
+            @endcode</td>
+    </tr>
+</table>
+
+### ds5_back_as_touchpad_click
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Allow Select/Back inputs to also trigger the DualSense touchpad click. This lets Xbox-style
+            and other controllers expose a touchpad click while explicitly emulating DS5.
+            @hint{This mapping is disabled by default and does not replace a dedicated touchpad button.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            disabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            ds5_back_as_touchpad_click = enabled
             @endcode</td>
     </tr>
 </table>

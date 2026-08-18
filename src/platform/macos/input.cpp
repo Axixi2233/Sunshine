@@ -380,7 +380,8 @@ const KeyCodeMap kKeyCodesMap[] = {
     return -1;
   }
 
-  void free_gamepad(input_t &input, int nr) {
+  void free_gamepad(input_t &input, int nr, bool retain_device) {
+    (void) retain_device;
     BOOST_LOG(info) << "free_gamepad: Gamepad not yet implemented for MacOS."sv;
   }
 

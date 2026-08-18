@@ -58,6 +58,8 @@ constexpr int IDX_RUMBLE_TRIGGER_DATA = 12;  ///< Control-stream message index f
 constexpr int IDX_SET_MOTION_EVENT = 13;  ///< Control-stream message index for set motion event.
 constexpr int IDX_SET_RGB_LED = 14;  ///< Control-stream message index for set rgb led.
 constexpr int IDX_SET_ADAPTIVE_TRIGGERS = 15;  ///< Control-stream message index for set adaptive triggers.
+constexpr int IDX_SET_PLAYER_INDICATOR = 16;  ///< Control-stream message index for set player indicator.
+constexpr int IDX_CONTROLLER_HAPTIC_PCM = 17;  ///< Control-stream message index for native controller PCM.
 
 static const short packetTypes[] = {
   0x0305,  // Start A
@@ -76,6 +78,8 @@ static const short packetTypes[] = {
   0x5501,  // Set motion event (Sunshine protocol extension)
   0x5502,  // Set RGB LED (Sunshine protocol extension)
   0x5503,  // Set Adaptive triggers (Sunshine protocol extension)
+  0x5504,  // Set player indicator (Sunshine protocol extension)
+  0x5505,  // Native controller audio/haptics PCM (Sunshine protocol extension)
 };
 
 namespace asio = boost::asio;
@@ -265,6 +269,16 @@ namespace stream {
   };
 
   /**
+   * @brief Control payload that sets DualSense player-indicator LEDs.
+   */
+  struct control_set_player_indicator_t {
+    control_header_v2 header;  ///< Control message header preceding this payload.
+
+    std::uint16_t id;  ///< Controller identifier associated with this message.
+    std::uint8_t value;  ///< Raw five-bit DualSense player-indicator mask.
+  };
+
+  /**
    * @brief Control payload that configures DualSense adaptive triggers.
    */
   struct control_adaptive_triggers_t {
@@ -280,6 +294,19 @@ namespace stream {
     std::uint8_t type_right;  ///< Adaptive-trigger mode for the right trigger.
     std::uint8_t left[DS_EFFECT_PAYLOAD_SIZE];  ///< Left adaptive-trigger effect payload.
     std::uint8_t right[DS_EFFECT_PAYLOAD_SIZE];  ///< Right adaptive-trigger effect payload.
+  };
+
+  /**
+   * @brief Fixed metadata preceding native controller audio/haptics PCM.
+   */
+  struct control_controller_haptic_pcm_t {
+    control_header_v2 header;  ///< Control message header preceding this payload.
+    std::uint16_t id;  ///< Controller identifier associated with this message.
+    std::uint16_t sequence;  ///< Rolling PCM window sequence number.
+    std::uint32_t sample_rate;  ///< PCM sample rate in Hz.
+    std::uint16_t pcm_size;  ///< Number of PCM bytes following this structure.
+    std::uint8_t channels;  ///< Interleaved PCM channel count.
+    std::uint8_t bits_per_sample;  ///< Bits stored for each sample.
   };
 
   /**
@@ -1091,6 +1118,43 @@ namespace stream {
         encrypted_payload;
 
       payload = encode_control(session, util::view(plaintext), encrypted_payload);
+    } else if (msg.type == platf::gamepad_feedback_e::set_player_indicator) {
+      control_set_player_indicator_t plaintext;
+      plaintext.header.type = packetTypes[IDX_SET_PLAYER_INDICATOR];
+      plaintext.header.payloadLength = sizeof(plaintext) - sizeof(control_header_v2);
+      plaintext.id = util::endian::little(msg.id);
+      plaintext.value = msg.data.player_indicator.value;
+
+      BOOST_LOG(verbose) << "Player indicator: "sv << msg.id << " :: "sv << util::hex(plaintext.value).to_string_view();
+      std::array<std::uint8_t, sizeof(control_encrypted_t) + crypto::cipher::round_to_pkcs7_padded(sizeof(plaintext)) + crypto::cipher::tag_size>
+        encrypted_payload;
+
+      payload = encode_control(session, util::view(plaintext), encrypted_payload);
+    } else if (msg.type == platf::gamepad_feedback_e::controller_haptic_pcm) {
+      const auto &data = msg.data.controller_haptic_pcm;
+      if (data.size == 0 || data.size > platf::MAX_GAMEPAD_HAPTIC_PCM_BYTES) {
+        BOOST_LOG(warning) << "Ignored invalid native controller PCM feedback size "sv << data.size;
+        return -1;
+      }
+
+      control_controller_haptic_pcm_t pcm_header {};
+      pcm_header.header.type = packetTypes[IDX_CONTROLLER_HAPTIC_PCM];
+      pcm_header.header.payloadLength = static_cast<std::uint16_t>(sizeof(pcm_header) - sizeof(control_header_v2) + data.size);
+      pcm_header.id = util::endian::little(msg.id);
+      pcm_header.sequence = util::endian::little(data.sequence);
+      pcm_header.sample_rate = util::endian::little(data.sample_rate);
+      pcm_header.pcm_size = util::endian::little(data.size);
+      pcm_header.channels = data.channels;
+      pcm_header.bits_per_sample = data.bits_per_sample;
+
+      std::vector<std::uint8_t> plaintext(sizeof(pcm_header) + data.size);
+      std::memcpy(plaintext.data(), &pcm_header, sizeof(pcm_header));
+      std::copy_n(data.pcm.begin(), data.size, plaintext.begin() + sizeof(pcm_header));
+      constexpr std::size_t max_plaintext_size = sizeof(control_controller_haptic_pcm_t) + platf::MAX_GAMEPAD_HAPTIC_PCM_BYTES;
+      std::array<std::uint8_t, sizeof(control_encrypted_t) + crypto::cipher::round_to_pkcs7_padded(max_plaintext_size) + crypto::cipher::tag_size>
+        encrypted_payload;
+
+      payload = encode_control(session, util::view(plaintext.data(), plaintext.data() + plaintext.size()), encrypted_payload);
     } else {
       BOOST_LOG(error) << "Unknown gamepad feedback message type"sv;
       return -1;
@@ -1365,7 +1429,10 @@ namespace stream {
         break;
       }
 
-      server->iterate(150ms);
+      // Native controller PCM is delivered in 10 ms windows. Keeping the control-service wait
+      // below that cadence prevents the bounded feedback queue from accumulating and then
+      // emitting audio-haptics frames in large, perceptibly discontinuous bursts.
+      server->iterate(5ms);
     }
 
     // Let all remaining connections know the server is shutting down

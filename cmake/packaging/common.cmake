@@ -39,6 +39,11 @@ configure_file(
 # install built vite assets
 install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/assets/web"
         DESTINATION "${SUNSHINE_ASSETS_DIR}")
+# Install the default tray icon explicitly because the Web UI build recreates
+# assets/web and can remove the copy made during CMake configuration.
+install(FILES "${CMAKE_SOURCE_DIR}/sunshine.svg"
+        DESTINATION "${SUNSHINE_ASSETS_DIR}/web/images"
+        RENAME "logo-sunshine.svg")
 
 # platform specific packaging
 if(WIN32)
