@@ -103,6 +103,61 @@ internal sealed class NativePcmDiagnosticWindow
     }
 }
 
+/// <summary>Classifies the ordinary-rumble portion of one DualSense USB output report.</summary>
+internal enum DualSenseRumbleChange
+{
+    None,
+    Update,
+    Cancel,
+}
+
+/// <summary>Parses ordinary rumble and SDL-style cancellation from DualSense USB output reports.</summary>
+internal static class DualSenseOutputReport
+{
+    private const int PayloadLength = 47;
+    private const byte CompatibleRumbleFlag0 = 0x01;
+    private const byte CompatibleRumbleFlag2 = 0x04;
+
+    /// <summary>Classify the rumble state carried by a normalized report-ID-free payload.</summary>
+    /// <param name="output">Normalized 47-byte DualSense USB output payload.</param>
+    /// <param name="wasActive">Whether the last forwarded motor values were non-zero.</param>
+    /// <param name="leftMotor">Decoded heavy/left motor value, or zero for cancellation.</param>
+    /// <param name="rightMotor">Decoded light/right motor value, or zero for cancellation.</param>
+    /// <returns>The rumble state transition represented by this report.</returns>
+    internal static DualSenseRumbleChange ClassifyRumble(
+        ReadOnlySpan<byte> output,
+        bool wasActive,
+        out byte leftMotor,
+        out byte rightMotor)
+    {
+        leftMotor = 0;
+        rightMotor = 0;
+        if (output.Length < PayloadLength)
+        {
+            return DualSenseRumbleChange.None;
+        }
+
+        byte valid0 = output[0];
+        byte valid1 = output[1];
+        byte valid2 = output[38];
+        if ((valid0 & CompatibleRumbleFlag0) != 0 || (valid2 & CompatibleRumbleFlag2) != 0)
+        {
+            rightMotor = output[2];
+            leftMotor = output[3];
+            return DualSenseRumbleChange.Update;
+        }
+
+        // SDL stops DualSense-compatible rumble by clearing the complete effect state.
+        // This is the same special stop report handled by Sunshine's Linux DS5 backend.
+        if (wasActive && valid0 == 0 && valid1 == 0 && valid2 == 0)
+        {
+            return DualSenseRumbleChange.Cancel;
+        }
+
+        return DualSenseRumbleChange.None;
+    }
+}
+
 /// <summary>Encodes the data portion of a DualSense USB input report 0x01.</summary>
 internal static class DualSenseInputReport
 {
@@ -280,6 +335,7 @@ internal sealed class ControllerSlot : IDisposable
     internal HMAxis LeftTrigger { get; }
     internal HMAxis RightTrigger { get; }
     internal bool LoggedRumbleOutput { get; set; }
+    internal bool LoggedRumbleCancel { get; set; }
     internal bool LoggedAdaptiveTriggerOutput { get; set; }
     internal bool LoggedRgbOutput { get; set; }
     internal bool LoggedPlayerIndicatorOutput { get; set; }
@@ -288,6 +344,9 @@ internal sealed class ControllerSlot : IDisposable
     internal bool LoggedGyroscopeInput { get; set; }
     internal bool LoggedUnsupportedOutput { get; set; }
     internal bool LoggedInputReportFailure { get; set; }
+    internal byte LastRumbleLeft { get; set; }
+    internal byte LastRumbleRight { get; set; }
+    internal bool RumbleActive => LastRumbleLeft != 0 || LastRumbleRight != 0;
 
     /// <summary>Return and advance the rolling native PCM sequence number.</summary>
     internal ushort NextPcmSequence()
@@ -600,7 +659,28 @@ internal sealed class Host : IDisposable
             bool parsedSeparatedReportId = TryGetDualSenseUsbOutput(0x02, usbOutput, out ReadOnlySpan<byte> separatedPayload) &&
                                              separatedPayload[2] == 0x22 && separatedPayload[3] == 0x44 && separatedPayload[43] == 0x15;
             bool parsedIncludedReportId = TryGetDualSenseUsbOutput(0x00, ridIncludedOutput, out ReadOnlySpan<byte> includedPayload) &&
-                                             includedPayload[2] == 0x22 && includedPayload[3] == 0x44 && includedPayload[43] == 0x15;
+                                              includedPayload[2] == 0x22 && includedPayload[3] == 0x44 && includedPayload[43] == 0x15;
+            byte[] improvedRumble = new byte[47];
+            improvedRumble[0] = 0x02;
+            improvedRumble[2] = 0x35;
+            improvedRumble[3] = 0x77;
+            improvedRumble[38] = 0x04;
+            bool parsedImprovedRumble = DualSenseOutputReport.ClassifyRumble(improvedRumble, false, out byte improvedLeft, out byte improvedRight) == DualSenseRumbleChange.Update &&
+                                        improvedLeft == 0x77 && improvedRight == 0x35;
+            byte[] rumbleStart = new byte[47];
+            rumbleStart[0] = 0x02;
+            bool ignoredRumbleStart = DualSenseOutputReport.ClassifyRumble(rumbleStart, false, out _, out _) == DualSenseRumbleChange.None;
+            byte[] explicitRumbleStop = new byte[47];
+            explicitRumbleStop[0] = 0x01;
+            bool parsedExplicitRumbleStop = DualSenseOutputReport.ClassifyRumble(explicitRumbleStop, true, out byte explicitLeft, out byte explicitRight) == DualSenseRumbleChange.Update &&
+                                             explicitLeft == 0 && explicitRight == 0;
+            byte[] clearedEffects = new byte[47];
+            bool parsedRumbleCancel = DualSenseOutputReport.ClassifyRumble(clearedEffects, true, out byte cancelLeft, out byte cancelRight) == DualSenseRumbleChange.Cancel &&
+                                      cancelLeft == 0 && cancelRight == 0 &&
+                                      DualSenseOutputReport.ClassifyRumble(clearedEffects, false, out _, out _) == DualSenseRumbleChange.None;
+            byte[] lightbarOnly = new byte[47];
+            lightbarOnly[1] = 0x04;
+            bool ignoredNonRumbleOutput = DualSenseOutputReport.ClassifyRumble(lightbarOnly, true, out _, out _) == DualSenseRumbleChange.None;
             HMGamepadState inputState = new()
             {
                 Buttons = HMButton.A | HMButton.X | HMButton.LeftBumper | HMButton.Back | HMButton.Guide | HMButton.Touchpad | HMButton.Misc1,
@@ -679,6 +759,11 @@ internal sealed class Host : IDisposable
                    4 + 10 + 10 == 24 &&
                    parsedSeparatedReportId &&
                    parsedIncludedReportId &&
+                   parsedImprovedRumble &&
+                   ignoredRumbleStart &&
+                   parsedExplicitRumbleStop &&
+                   parsedRumbleCancel &&
+                   ignoredNonRumbleOutput &&
                    encodedInputReport &&
                    encodedPcmPayload &&
                    measuredPcmPeaks &&
@@ -1010,19 +1095,32 @@ internal sealed class Host : IDisposable
 
         byte valid0 = output[0];
         byte valid1 = output[1];
+        byte valid2 = output[38];
 
-        if ((valid0 & 0x03) != 0)
+        byte previousLeftMotor = slot.LastRumbleLeft;
+        byte previousRightMotor = slot.LastRumbleRight;
+        DualSenseRumbleChange rumbleChange = DualSenseOutputReport.ClassifyRumble(
+            output,
+            slot.RumbleActive,
+            out byte leftMotor,
+            out byte rightMotor);
+        if (rumbleChange != DualSenseRumbleChange.None)
         {
-            byte rightMotor = output[2];
-            byte leftMotor = output[3];
             Span<byte> rumble = stackalloc byte[4];
             BinaryPrimitives.WriteUInt16LittleEndian(rumble, (ushort)(leftMotor * 257));
             BinaryPrimitives.WriteUInt16LittleEndian(rumble[2..], (ushort)(rightMotor * 257));
             Send(Protocol.MessageType.Rumble, slot.Id, rumble);
+            slot.LastRumbleLeft = leftMotor;
+            slot.LastRumbleRight = rightMotor;
             if (!slot.LoggedRumbleOutput && (leftMotor != 0 || rightMotor != 0))
             {
-                SendLog($"DS5 native rumble {slot.Id}: flags=0x{valid0:X2}, heavy={leftMotor}, light={rightMotor}, source={packet.Source}");
+                SendLog($"DS5 native rumble {slot.Id}: flags0=0x{valid0:X2}, flags2=0x{valid2:X2}, heavy={leftMotor}, light={rightMotor}, source={packet.Source}");
                 slot.LoggedRumbleOutput = true;
+            }
+            if (rumbleChange == DualSenseRumbleChange.Cancel && !slot.LoggedRumbleCancel)
+            {
+                SendLog($"DS5 rumble cancel {slot.Id}: flags0=0x{valid0:X2}, flags1=0x{valid1:X2}, flags2=0x{valid2:X2}, previous={previousLeftMotor}/{previousRightMotor}, source={packet.Source}, sequence={packet.SeqNo}");
+                slot.LoggedRumbleCancel = true;
             }
         }
 
