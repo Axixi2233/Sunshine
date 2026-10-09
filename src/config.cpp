@@ -771,6 +771,7 @@ namespace config {
     },
 
     {},  // capture
+    false,  // fp16_sdr_gamma_encoded
     {},  // encoder
     {},  // adapter_name
     {},  // output_name
@@ -1673,6 +1674,7 @@ namespace config {
     int_f(vars, "vk_rc_mode", video.vk.rc_mode);
 
     string_f(vars, "capture", video.capture);
+    bool_f(vars, "fp16_sdr_gamma_encoded", video.fp16_sdr_gamma_encoded);
     string_f(vars, "encoder", video.encoder);
     string_f(vars, "adapter_name", video.adapter_name);
     string_f(vars, "output_name", video.output_name);

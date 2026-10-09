@@ -287,6 +287,13 @@ TEST_P(AmfMaxAuSizeConfigTest, AcceptsOnlyFfmpegSupportedRange) {
   EXPECT_EQ(expected, config::video.amd.amd_max_au_size);
 }
 
+TEST_P(AmfMaxAuSizeConfigTest, ParsesFp16SdrGammaOption) {
+  config::apply_config_for_test("fp16_sdr_gamma_encoded = enabled\n");
+  EXPECT_TRUE(config::video.fp16_sdr_gamma_encoded);
+  config::apply_config_for_test("fp16_sdr_gamma_encoded = disabled\n");
+  EXPECT_FALSE(config::video.fp16_sdr_gamma_encoded);
+}
+
 INSTANTIATE_TEST_SUITE_P(
   AmfMaxAuSizeValues,
   AmfMaxAuSizeConfigTest,
