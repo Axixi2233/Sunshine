@@ -6,6 +6,7 @@
 #pragma once
 
 // standard includes
+#include <cstdint>
 #include <string>
 
 // lib includes
@@ -245,4 +246,12 @@ namespace nvhttp {
    * @examples_end
    */
   void erase_all_clients();
+
+  /**
+   * @brief Get codec mode flags.
+   *
+   * @return Moonlight codec capability bitmask for the currently probed encoders.
+   */
+  uint32_t get_codec_mode_flags();
+
 }  // namespace nvhttp
