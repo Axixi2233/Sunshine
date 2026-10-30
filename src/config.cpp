@@ -1291,7 +1291,7 @@ namespace config {
    * @return True when the tested parser condition is met.
    */
   bool to_bool(std::string &boolean) {
-    std::for_each(std::begin(boolean), std::end(boolean), [](char ch) {
+    std::transform(std::begin(boolean), std::end(boolean), std::begin(boolean), [](unsigned char ch) {
       return (char) std::tolower(ch);
     });
 
