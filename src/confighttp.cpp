@@ -8,6 +8,7 @@
 
 // standard includes
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -45,6 +46,7 @@
 #include "rtsp.h"
 #include "utility.h"
 #include "uuid.h"
+#include "web_sessions.h"
 
 using namespace std::literals;
 
@@ -93,6 +95,31 @@ namespace confighttp {
   std::map<std::string, csrf_token_t, std::less<>> csrf_tokens;  ///< CSRF tokens by client identifier. NOSONAR(cpp:S5421) - intentionally mutable global
   std::mutex csrf_tokens_mutex;  ///< Mutex protecting CSRF token storage. NOSONAR(cpp:S5421) - intentionally mutable global
 
+  web_sessions::store browser_sessions;  ///< Process-local authenticated browser sessions.
+
+  /**
+   * @brief Extract a single session cookie from a request.
+   * @param request HTTPS request.
+   * @return Cookie token, or empty when missing or ambiguous.
+   */
+  std::string session_token(const req_https_t &request) {
+    const auto range = request->header.equal_range("Cookie");
+    std::string cookies;
+    for (auto it = range.first; it != range.second; ++it) {
+      cookies += it->second + ";";
+    }
+    return web_sessions::cookie_token(cookies);
+  }
+
+  /**
+   * @brief Validate a browser session against the currently configured credentials.
+   * @param request HTTPS request.
+   * @return Whether the request has an active browser session.
+   */
+  bool authenticated_session(const req_https_t &request) {
+    return browser_sessions.valid(session_token(request), config::sunshine.username + ":" + config::sunshine.password + ":" + config::sunshine.salt, std::chrono::steady_clock::now());
+  }
+
   // CSRF token configuration
   /**
    * @brief Number of random bytes used when generating a CSRF token.
@@ -112,7 +139,7 @@ namespace confighttp {
     BOOST_LOG(debug) << "DESTINATION :: "sv << request->path;
 
     for (auto &[name, val] : request->header) {
-      BOOST_LOG(debug) << name << " -- " << (name == "Authorization" ? "CREDENTIALS REDACTED" : val);
+      BOOST_LOG(debug) << name << " -- " << (boost::iequals(name, "Authorization") || boost::iequals(name, "Cookie") ? "CREDENTIALS REDACTED" : val);
     }
 
     BOOST_LOG(debug) << " [--] "sv;
@@ -155,7 +182,7 @@ namespace confighttp {
 
     const SimpleWeb::CaseInsensitiveMultimap headers {
       {"Content-Type", "application/json"},
-      {"WWW-Authenticate", R"(Basic realm="Sunshine Gamestream Host", charset="UTF-8")"},
+      {"Cache-Control", "no-store"},
       {"X-Frame-Options", "DENY"},
       {"Content-Security-Policy", "frame-ancestors 'none';"}
     };
@@ -184,9 +211,10 @@ namespace confighttp {
    * @brief Authenticate the user.
    * @param response The HTTP response object.
    * @param request The HTTP request object.
+   * @param redirect_to_login Redirect unauthenticated page requests to the login form.
    * @return True if the user is authenticated, false otherwise.
    */
-  bool authenticate(const resp_https_t &response, const req_https_t &request) {
+  bool authenticate(const resp_https_t &response, const req_https_t &request, bool redirect_to_login) {
     auto address = net::addr_to_normalized_string(request->remote_endpoint().address());
 
     if (const auto ip_type = net::from_address(address); ip_type > http::origin_web_ui_allowed) {
@@ -201,9 +229,25 @@ namespace confighttp {
       return false;
     }
 
+    if (authenticated_session(request)) {
+      return true;
+    }
+
     auto fg = util::fail_guard([&]() {
-      send_unauthorized(response, request);
+      if (redirect_to_login) {
+        const auto destination = "/login?next=" + request->path;
+        send_redirect(response, request, destination.c_str());
+      } else {
+        send_unauthorized(response, request);
+      }
     });
+
+    // Browsers use sessions exclusively, including after logout with cached Basic credentials.
+    const auto accept = request->header.find("Accept");
+    if (request->header.contains("Sec-Fetch-Mode") || request->header.contains("Cookie") ||
+        (accept != request->header.end() && accept->second.find("text/html") != std::string::npos)) {
+      return false;
+    }
 
     const auto auth = request->header.find("authorization");
     if (auth == request->header.end()) {
@@ -211,10 +255,13 @@ namespace confighttp {
     }
 
     const auto &rawAuth = auth->second;
+    if (!rawAuth.starts_with("Basic ")) {
+      return false;
+    }
     auto authData = SimpleWeb::Crypto::Base64::decode(rawAuth.substr("Basic "sv.length()));
 
-    const auto index = static_cast<int>(authData.find(':'));
-    if (index >= authData.size() - 1) {
+    const auto index = authData.find(':');
+    if (index == std::string::npos || index == 0 || index + 1 >= authData.size()) {
       return false;
     }
 
@@ -307,6 +354,9 @@ namespace confighttp {
    * @return A unique identifier based on username or IP address.
    */
   std::string get_client_id(const req_https_t &request) {
+    if (authenticated_session(request)) {
+      return "session:" + session_token(request);
+    }
     // Try to use the authenticated username as client ID
     if (const auto auth = request->header.find("authorization"); !config::sunshine.username.empty() && auth != request->header.end()) {
       if (const auto &rawAuth = auth->second; rawAuth.rfind("Basic "sv, 0) == 0) {
@@ -466,6 +516,66 @@ namespace confighttp {
   }
 
   /**
+   * @brief Validate session-changing requests using JSON and exact browser origin checks.
+   * @param response HTTPS response.
+   * @param request HTTPS request.
+   * @return Whether the request may change authentication state.
+   */
+  bool check_session_request(const resp_https_t &response, const req_https_t &request) {
+    if (net::from_address(net::addr_to_normalized_string(request->remote_endpoint().address())) > http::origin_web_ui_allowed) {
+      response->write(SimpleWeb::StatusCode::client_error_forbidden);
+      return false;
+    }
+    if (!check_content_type(response, request, "application/json")) {
+      return false;
+    }
+    const auto origin = request->header.find("Origin");
+    const auto host = request->header.find("Host");
+    const auto site = request->header.find("Sec-Fetch-Site");
+    if ((site != request->header.end() && site->second == "cross-site") ||
+        (origin != request->header.end() && (host == request->header.end() || origin->second != "https://" + host->second))) {
+      response->write(SimpleWeb::StatusCode::client_error_forbidden);
+      return false;
+    }
+    return true;
+  }
+
+  void login(const resp_https_t &response, const req_https_t &request) {
+    if (!check_session_request(response, request)) {
+      return;
+    }
+    try {
+      const auto input = nlohmann::json::parse(request->content.string());
+      const auto username = input.value("username", std::string {});
+      const auto password = input.value("password", std::string {});
+      const auto hash = util::hex(crypto::hash(password + config::sunshine.salt)).to_string();
+      if (config::sunshine.username.empty() || password.empty() || !boost::iequals(username, config::sunshine.username) || hash != config::sunshine.password) {
+        send_unauthorized(response, request);
+        return;
+      }
+      std::array<unsigned char, 32> random_bytes {};
+      if (RAND_bytes(random_bytes.data(), static_cast<int>(random_bytes.size())) != 1) {
+        response->write(SimpleWeb::StatusCode::server_error_internal_server_error);
+        return;
+      }
+      const auto token = util::hex(random_bytes).to_string();
+      browser_sessions.remove(session_token(request));
+      browser_sessions.add(token, config::sunshine.username + ":" + config::sunshine.password + ":" + config::sunshine.salt, std::chrono::steady_clock::now());
+      response->write(R"({"status":true})", args_t {{"Content-Type", "application/json"}, {"Cache-Control", "no-store"}, {"Set-Cookie", "sunshine_session=" + token + "; Path=/; Secure; HttpOnly; SameSite=Strict"}});
+    } catch (const nlohmann::json::exception &) {
+      bad_request(response, request, "Invalid login request");
+    }
+  }
+
+  void logout(const resp_https_t &response, const req_https_t &request) {
+    if (!check_session_request(response, request)) {
+      return;
+    }
+    browser_sessions.remove(session_token(request));
+    response->write(R"({"status":true})", args_t {{"Content-Type", "application/json"}, {"Cache-Control", "no-store"}, {"Set-Cookie", "sunshine_session=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Strict"}});
+  }
+
+  /**
    * @brief Get an HTML page.
    * @param response The HTTP response object.
    * @param request The HTTP request object.
@@ -480,7 +590,12 @@ namespace confighttp {
       return;
     }
 
-    if (require_auth && !authenticate(response, request)) {
+    if (std::string_view(html_file) == "login.html" && config::sunshine.username.empty()) {
+      send_redirect(response, request, "/welcome");
+      return;
+    }
+
+    if (require_auth && !authenticate(response, request, true)) {
       return;
     }
 
@@ -489,6 +604,7 @@ namespace confighttp {
     const std::string content = file_handler::read_file((std::string(WEB_DIR) + html_file).c_str());
     SimpleWeb::CaseInsensitiveMultimap headers;
     headers.emplace("Content-Type", "text/html; charset=utf-8");
+    headers.emplace("Cache-Control", "no-store");
 
     // prevent click jacking
     headers.emplace("X-Frame-Options", "DENY");
@@ -1309,6 +1425,7 @@ namespace confighttp {
           } else {
             http::save_user_creds(config::sunshine.credentials_file, newUsername, newPassword);
             http::reload_user_creds(config::sunshine.credentials_file);
+            browser_sessions.clear();
             output_tree["status"] = true;
           }
         } else {
@@ -1848,6 +1965,7 @@ namespace confighttp {
     server.resource["^/config/?$"]["GET"] = page_handler("config.html");
     server.resource["^/featured/?$"]["GET"] = page_handler("featured.html");
     server.resource["^/logout/?$"]["GET"] = page_handler("logout.html", false);
+    server.resource["^/login/?$"]["GET"] = page_handler("login.html", false);
     server.resource["^/password/?$"]["GET"] = page_handler("password.html");
     server.resource["^/pin/?$"]["GET"] = page_handler("pin.html");
     server.resource["^/troubleshooting/?$"]["GET"] = page_handler("troubleshooting.html");
@@ -1855,6 +1973,8 @@ namespace confighttp {
 
     // rest api
     server.resource["^/api/browse$"]["GET"] = browseDirectory;
+    server.resource["^/api/login$"]["POST"] = login;
+    server.resource["^/api/logout$"]["POST"] = logout;
     server.resource["^/api/apps$"]["GET"] = getApps;
     server.resource["^/api/apps$"]["POST"] = saveApp;
     server.resource["^/api/apps/([0-9]+)$"]["DELETE"] = deleteApp;
@@ -1917,5 +2037,6 @@ namespace confighttp {
     server.stop();
 
     tcp.join();
+    browser_sessions.clear();
   }
 }  // namespace confighttp

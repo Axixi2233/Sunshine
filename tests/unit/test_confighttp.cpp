@@ -162,6 +162,8 @@ protected:
     server->config.reuse_address = true;
     server->config.timeout_request = 5;
     server->config.timeout_content = 300;
+    server->resource["^/api/login$"]["POST"] = confighttp::login;
+    server->resource["^/api/logout$"]["POST"] = confighttp::logout;
 
     // Add a route to test authentication directly
     server->resource["^/auth-test$"]["GET"] = [](
@@ -390,9 +392,9 @@ TEST_F(ConfigHttpTest, AuthenticateRejectsNoAuth) {
   const auto response = client->request("GET", "/auth-test");
   ASSERT_EQ(response->status_code, "401 Unauthorized");
 
-  // Check for WWW-Authenticate header
+  // Authentication failures must not trigger native browser prompts.
   const auto www_auth = response->header.find("WWW-Authenticate");
-  ASSERT_NE(www_auth, response->header.end());
+  ASSERT_EQ(www_auth, response->header.end());
 }
 
 // Test: confighttp::authenticate() accepts valid credentials
@@ -430,10 +432,9 @@ TEST_F(ConfigHttpTest, SendUnauthorizedResponse) {
   const auto response = client->request("GET", "/unauthorized-test");
   ASSERT_EQ(response->status_code, "401 Unauthorized");
 
-  // Check for WWW-Authenticate header
+  // Authentication failures must not trigger native browser prompts.
   const auto www_auth = response->header.find("WWW-Authenticate");
-  ASSERT_NE(www_auth, response->header.end());
-  ASSERT_TRUE(www_auth->second.find("Basic realm") != std::string::npos);
+  ASSERT_EQ(www_auth, response->header.end());
 
   // Check security headers
   assert_security_headers(response);
@@ -678,11 +679,76 @@ TEST_F(ConfigHttpTest, GetPageWithAuth) {
 // Test: confighttp::getPage() requires authentication when require_auth=true
 TEST_F(ConfigHttpTest, GetPageRequiresAuth) {
   const auto response = client->request("GET", "/page-test");
-  ASSERT_EQ(response->status_code, "401 Unauthorized");
+  ASSERT_EQ(response->status_code, "307 Temporary Redirect");
+  ASSERT_EQ(response->header.find("Location")->second, "/login?next=/page-test");
 
-  // Should have WWW-Authenticate header since auth is required
+  // Page redirects must not trigger a native browser prompt.
   const auto www_auth = response->header.find("WWW-Authenticate");
-  ASSERT_NE(www_auth, response->header.end());
+  ASSERT_EQ(www_auth, response->header.end());
+}
+
+TEST_F(ConfigHttpTest, BrowserSessionLoginLogout) {
+  SimpleWeb::CaseInsensitiveMultimap headers {{"Content-Type", "application/json"}};
+  auto response = client->request("POST", "/api/login", R"({"username":"testuser","password":"testpass"})", headers);
+  ASSERT_EQ(response->status_code, "200 OK");
+  const auto cookie = response->header.find("Set-Cookie");
+  ASSERT_NE(cookie, response->header.end());
+  EXPECT_NE(cookie->second.find("HttpOnly"), std::string::npos);
+  EXPECT_NE(cookie->second.find("Secure"), std::string::npos);
+  EXPECT_NE(cookie->second.find("SameSite=Strict"), std::string::npos);
+  headers.emplace("Cookie", cookie->second.substr(0, cookie->second.find(';')));
+  headers.emplace("Sec-Fetch-Mode", "cors");
+  EXPECT_EQ(client->request("GET", "/auth-test", "", headers)->status_code, "200 OK");
+  response = client->request("POST", "/api/logout", "{}", headers);
+  ASSERT_EQ(response->status_code, "200 OK");
+  EXPECT_NE(response->header.find("Set-Cookie")->second.find("Max-Age=0"), std::string::npos);
+  headers.emplace("Authorization", create_auth_header("testuser", "testpass"));
+  EXPECT_EQ(client->request("GET", "/auth-test", "", headers)->status_code, "401 Unauthorized");
+}
+
+TEST_F(ConfigHttpTest, BrowserLoginRejectsInvalidRequests) {
+  SimpleWeb::CaseInsensitiveMultimap headers {{"Content-Type", "application/json"}};
+  EXPECT_EQ(client->request("POST", "/api/login", R"({"username":"testuser","password":"wrong"})", headers)->status_code, "401 Unauthorized");
+  EXPECT_EQ(client->request("POST", "/api/login", "{", headers)->status_code, "400 Bad Request");
+  EXPECT_EQ(client->request("POST", "/api/login", R"({"username":42})", headers)->status_code, "400 Bad Request");
+  headers.emplace("Origin", "https://evil.example");
+  EXPECT_EQ(client->request("POST", "/api/login", R"({"username":"testuser","password":"testpass"})", headers)->status_code, "403 Forbidden");
+  EXPECT_EQ(client->request("POST", "/api/logout", "{}", headers)->status_code, "403 Forbidden");
+}
+
+TEST_F(ConfigHttpTest, BrowserLoginRequiresJsonAndSameOrigin) {
+  SimpleWeb::CaseInsensitiveMultimap headers {{"Content-Type", "text/plain"}};
+  const std::string body = R"({"username":"testuser","password":"testpass"})";
+  EXPECT_EQ(client->request("POST", "/api/login", body, headers)->status_code, "400 Bad Request");
+  headers.clear();
+  headers.emplace("Content-Type", "application/json");
+  headers.emplace("Origin", std::format("https://localhost:{}", port));
+  EXPECT_EQ(client->request("POST", "/api/login", body, headers)->status_code, "200 OK");
+  headers.emplace("Sec-Fetch-Site", "cross-site");
+  EXPECT_EQ(client->request("POST", "/api/login", body, headers)->status_code, "403 Forbidden");
+}
+
+TEST_F(ConfigHttpTest, MalformedAndCachedBrowserBasicCredentialsAreRejected) {
+  for (const auto &value : {std::string("Bearer token"), std::string("Basic "), create_auth_header("", "testpass"), std::string("Basic dGVzdHVzZXI=")}) {
+    const SimpleWeb::CaseInsensitiveMultimap headers {{"Authorization", value}};
+    EXPECT_EQ(client->request("GET", "/auth-test", "", headers)->status_code, "401 Unauthorized");
+  }
+  const SimpleWeb::CaseInsensitiveMultimap browser_headers {
+    {"Authorization", create_auth_header("testuser", "testpass")},
+    {"Accept", "text/html"}
+  };
+  EXPECT_EQ(client->request("GET", "/page-test", "", browser_headers)->status_code, "307 Temporary Redirect");
+}
+
+TEST_F(ConfigHttpTest, BrowserSessionInvalidatedByCredentialChange) {
+  SimpleWeb::CaseInsensitiveMultimap headers {{"Content-Type", "application/json"}};
+  const auto response = client->request("POST", "/api/login", R"({"username":"testuser","password":"testpass"})", headers);
+  ASSERT_EQ(response->status_code, "200 OK");
+  const auto cookie = response->header.find("Set-Cookie");
+  ASSERT_NE(cookie, response->header.end());
+  headers.emplace("Cookie", cookie->second.substr(0, cookie->second.find(';')));
+  config::sunshine.password = "changed";
+  EXPECT_EQ(client->request("GET", "/auth-test", "", headers)->status_code, "401 Unauthorized");
 }
 
 // Test: confighttp::getPage() works without authentication when require_auth=false

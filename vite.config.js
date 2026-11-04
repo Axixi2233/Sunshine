@@ -71,6 +71,7 @@ export default defineConfig({
                 featured: resolve(assetsSrcPath, 'featured.html'),
                 index: resolve(assetsSrcPath, 'index.html'),
                 logout: resolve(assetsSrcPath, 'logout.html'),
+                login: resolve(assetsSrcPath, 'login.html'),
                 password: resolve(assetsSrcPath, 'password.html'),
                 pin: resolve(assetsSrcPath, 'pin.html'),
                 troubleshooting: resolve(assetsSrcPath, 'troubleshooting.html'),

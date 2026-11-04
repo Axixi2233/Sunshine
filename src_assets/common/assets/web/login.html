@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="auto">
+<head><%- header %></head>
+<body id="app" v-cloak>
+  <Navbar-Simple></Navbar-Simple>
+  <main class="container py-5">
+    <div class="row justify-content-center">
+      <div class="col-md-8 col-lg-5">
+        <div class="card"><div class="card-body p-4">
+          <h1 class="h3 mb-3">{{ $t('login.title') }}</h1>
+          <p class="text-muted">{{ $t('login.description') }}</p>
+          <form @submit.prevent="login">
+            <div class="mb-3">
+              <label for="username" class="form-label">{{ $t('_common.username') }}</label>
+              <input id="username" name="username" class="form-control" autocomplete="username" v-model="username" required autofocus :disabled="loading">
+            </div>
+            <div class="mb-3">
+              <label for="password" class="form-label">{{ $t('_common.password') }}</label>
+              <input id="password" name="password" type="password" class="form-control" autocomplete="current-password" v-model="password" required :disabled="loading">
+            </div>
+            <div v-if="error" class="alert alert-danger" role="alert">{{ $t(error) }}</div>
+            <button type="submit" class="btn btn-primary w-100" :disabled="loading">{{ $t(loading ? 'login.signing_in' : 'logout.login') }}</button>
+          </form>
+        </div></div>
+      </div>
+    </div>
+  </main>
+</body>
+<script type="module">
+  import { createApp } from 'vue'
+  import { initApp } from './init'
+  import { loadAutoTheme } from './theme'
+  import { loginDestination } from './web_auth'
+  import NavbarSimple from './NavbarSimple.vue'
+
+  loadAutoTheme();
+  const app = createApp({
+    components: { NavbarSimple },
+    data: () => ({ username: '', password: '', loading: false, error: '' }),
+    methods: {
+      /** @brief Submit credentials without persisting them in browser storage. */
+      async login() {
+        this.loading = true;
+        this.error = '';
+        try {
+          const response = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: this.username, password: this.password })
+          });
+          if (!response.ok) {
+            this.error = response.status === 401 ? 'login.invalid_credentials' : 'login.failed';
+            return;
+          }
+          location.replace(loginDestination(location.search));
+        } catch {
+          this.error = 'login.failed';
+        } finally {
+          this.password = '';
+          this.loading = false;
+        }
+      }
+    }
+  });
+  initApp(app);
+</script>
+</html>

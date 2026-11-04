@@ -37,7 +37,20 @@ namespace confighttp {
   void send_response(const resp_https_t &response, const nlohmann::json &output_tree);
   void send_unauthorized(const resp_https_t &response, const req_https_t &request);
   void send_redirect(const resp_https_t &response, const req_https_t &request, const char *path);
-  bool authenticate(const resp_https_t &response, const req_https_t &request);
+  bool authenticate(const resp_https_t &response, const req_https_t &request, bool redirect_to_login = false);
+
+  /**
+   * @brief Exchange JSON credentials for a secure browser session cookie.
+   * @param response HTTPS response.
+   * @param request HTTPS login request.
+   */
+  void login(const resp_https_t &response, const req_https_t &request);
+  /**
+   * @brief Revoke the presented browser session and expire its cookie.
+   * @param response HTTPS response.
+   * @param request HTTPS logout request.
+   */
+  void logout(const resp_https_t &response, const req_https_t &request);
   void not_found(const resp_https_t &response, const req_https_t &request, const std::string &error_message = "Not Found");
   void bad_request(const resp_https_t &response, const req_https_t &request, const std::string &error_message = "Bad Request");
   /**

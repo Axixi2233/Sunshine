@@ -85,6 +85,7 @@
 import { CircleUserRound, Home, Info, Layers, Lock, LogOut, Settings, Shield, Star } from '@lucide/vue'
 import ThemeToggle from './ThemeToggle.vue'
 import Notification from './Notification.vue'
+import { notifyKey } from './Notification.vue'
 
 export default {
   components: {
@@ -122,21 +123,16 @@ export default {
     }
   },
   methods: {
-    logout() {
-      const cacheBuster = Date.now().toString()
-      const logoutPageUrl = new URL('/logout', globalThis.location.href)
-      const request = new XMLHttpRequest()
-      const finish = () => {
-        globalThis.location.replace(logoutPageUrl.toString())
+    async logout() {
+      try {
+        const response = await fetch('/api/logout', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+        });
+        if (!response.ok) throw new Error('Logout failed');
+        globalThis.location.replace('/logout');
+      } catch {
+        notifyKey.error('login.logout_failed', '_common.error');
       }
-
-      request.open('GET', '/', true, 'sunshine-logout', cacheBuster)
-      request.setRequestHeader('Cache-Control', 'no-store')
-      request.onload = finish
-      request.onerror = finish
-      request.ontimeout = finish
-      request.timeout = 5000
-      request.send()
     }
   }
 }

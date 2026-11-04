@@ -1,4 +1,15 @@
 import i18n from './locale'
+import { handleAuthentication } from './web_auth'
+
+// All pages, including ones using fetch directly, handle expired sessions consistently.
+const originalFetch = globalThis.fetch.bind(globalThis);
+globalThis.fetch = async (...args) => {
+    const response = await originalFetch(...args);
+    if (new URL(response.url, location.href).origin === location.origin) {
+        handleAuthentication(response, location);
+    }
+    return response;
+};
 
 import 'bootstrap/dist/css/bootstrap.min.css'
 // Load Sunshine.css after bootstrap to override some of the styles.
