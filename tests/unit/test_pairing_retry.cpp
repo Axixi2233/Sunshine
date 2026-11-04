@@ -12,7 +12,7 @@ namespace nvhttp {
   void add_authorized_client(const std::string &name, std::string &&cert);
   /** @brief Execute assertions without touching persistent client data. */
   void test_with_isolated_clients(const std::function<void()> &test);
-}
+}  // namespace nvhttp
 
 TEST(PairingCertificateTest, ReplacesExactIdentityAndKeepsDistinctCertificates) {
   const auto first = crypto::gen_creds("client", 2048);
@@ -50,8 +50,7 @@ TEST(PairingRetryTest, KeepsPendingApprovalAndReplacesEveryStartedPhase) {
   duplicate.client.cert = "replacement";
   EXPECT_EQ(&pending, &nvhttp::insert_pair_session(std::move(duplicate)));
   EXPECT_EQ(pending.client.cert, "original");
-  for (const auto phase : {nvhttp::PAIR_PHASE::GETSERVERCERT, nvhttp::PAIR_PHASE::CLIENTCHALLENGE,
-                          nvhttp::PAIR_PHASE::SERVERCHALLENGERESP, nvhttp::PAIR_PHASE::CLIENTPAIRINGSECRET}) {
+  for (const auto phase : {nvhttp::PAIR_PHASE::GETSERVERCERT, nvhttp::PAIR_PHASE::CLIENTCHALLENGE, nvhttp::PAIR_PHASE::SERVERCHALLENGERESP, nvhttp::PAIR_PHASE::CLIENTPAIRINGSECRET}) {
     nvhttp::pair_session_t lookup;
     lookup.client.uniqueID = id;
     auto &old = nvhttp::insert_pair_session(std::move(lookup));

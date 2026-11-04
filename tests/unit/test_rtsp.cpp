@@ -3,6 +3,7 @@
  * @brief Verify advertised surround mappings through the production DESCRIBE handler.
  */
 #include "../tests_common.h"
+
 #include <boost/asio.hpp>
 extern "C" {
 #include <moonlight-common-c/src/Rtsp.h>
@@ -17,7 +18,7 @@ namespace rtsp_stream {
   using msg_t = util::safe_ptr<RTSP_MESSAGE, free_msg>;
   /** @brief Invoke the production DESCRIBE response handler. */
   void cmd_describe(rtsp_server_t *server, boost::asio::ip::tcp::socket &sock, launch_session_t &session, msg_t &&req);
-}
+}  // namespace rtsp_stream
 
 TEST(RtspDescribeTest, AdvertisesCorrectSurroundChannelOrder) {
   using boost::asio::ip::tcp;

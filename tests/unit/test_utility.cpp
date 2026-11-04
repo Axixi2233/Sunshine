@@ -2,8 +2,9 @@
  * @file tests/unit/test_utility.cpp
  * @brief Bounds regression tests for hexadecimal conversion.
  */
-#include <gtest/gtest.h>
 #include "src/utility.h"
+
+#include <gtest/gtest.h>
 
 TEST(UtilityFromHexTests, LongInputKeepsTheLowOrderBytes) {
   EXPECT_EQ(util::from_hex<std::uint32_t>("123456789A"), util::endian::little(std::uint32_t {0x3456789A}));

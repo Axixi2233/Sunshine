@@ -783,7 +783,8 @@ namespace platf::audio {
       for (
         status = audio_capture->GetNextPacketSize(&packet_size);
         SUCCEEDED(status) && packet_size > 0;
-        status = audio_capture->GetNextPacketSize(&packet_size)) {
+        status = audio_capture->GetNextPacketSize(&packet_size)
+      ) {
         DWORD buffer_flags;
         status = audio_capture->GetBuffer(
           (BYTE **) &sample_aligned.samples,

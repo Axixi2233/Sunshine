@@ -2,9 +2,10 @@
  * @file tests/unit/test_config.cpp
  * @brief Regression coverage for configuration defaults and boolean conversion.
  */
+#include "src/config.h"
+
 #include <gtest/gtest.h>
 #include <string>
-#include "src/config.h"
 
 namespace config {
   /**
@@ -13,7 +14,7 @@ namespace config {
    * @return Parsed boolean value.
    */
   bool to_bool(std::string &value);
-}
+}  // namespace config
 
 TEST(ConfigDefaultsTest, TreatsFp16SdrCapturesAsLinear) {
   EXPECT_FALSE(config::video.fp16_sdr_gamma_encoded);

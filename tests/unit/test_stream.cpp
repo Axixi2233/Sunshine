@@ -12,7 +12,7 @@ namespace stream {
   std::vector<uint8_t> concat_and_insert(uint64_t insert_size, uint64_t slice_size, const std::string_view &data1, const std::string_view &data2);
   /** @brief Verify production ping routing keeps each channel's sender endpoint. */
   bool test_receive_ping_endpoints(bool session_id_pings);
-}
+}  // namespace stream
 
 #include "../tests_common.h"
 
