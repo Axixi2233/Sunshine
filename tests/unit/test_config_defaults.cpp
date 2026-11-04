@@ -10,6 +10,11 @@
 #include "src/config.h"
 
 namespace {
+  TEST(ConfigDefaults, VirtualDisplayIsOptIn) {
+    EXPECT_FALSE(config::video.virtual_display_enabled);
+    EXPECT_EQ(config::video.virtual_display_mode, 1);
+  }
+
   TEST(ConfigDefaults, InputFeaturesMatchDocumentedDefaults) {
     EXPECT_TRUE(config::input.keyboard);
     EXPECT_FALSE(config::input.key_rightalt_to_key_win);

@@ -773,6 +773,8 @@ namespace config {
     {},  // encoder
     {},  // adapter_name
     {},  // output_name
+    false,  // virtual_display_enabled
+    1,  // virtual_display_mode
 
     {
       video_t::dd_t::config_option_e::disabled,  // configuration_option
@@ -1666,6 +1668,8 @@ namespace config {
     string_f(vars, "encoder", video.encoder);
     string_f(vars, "adapter_name", video.adapter_name);
     string_f(vars, "output_name", video.output_name);
+    bool_f(vars, "virtual_display_enabled", video.virtual_display_enabled);
+    int_between_f(vars, "virtual_display_mode", video.virtual_display_mode, {1, 2});
 
     generic_f(vars, "dd_configuration_option", video.dd.configuration_option, dd::config_option_from_view);
     generic_f(vars, "dd_resolution_option", video.dd.resolution_option, dd::resolution_option_from_view);
@@ -2037,7 +2041,6 @@ namespace config {
         // Wait for the elevated process to finish starting the service
         WaitForSingleObject(shell_exec_info.hProcess, INFINITE);
         CloseHandle(shell_exec_info.hProcess);
-
       }
 
       // The Start Menu shortcut is the user-facing entry point for an installed build.

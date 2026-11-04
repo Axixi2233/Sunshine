@@ -100,6 +100,24 @@ const config = ref(props.config)
       :config="config"
     />
 
+    <PlatformLayout :platform="platform">
+      <template #windows>
+        <div class="card mb-3"><div class="card-body">
+          <Checkbox id="virtual_display_enabled" locale-prefix="config"
+                    v-model="config.virtual_display_enabled" default="false" />
+          <div class="mt-3">
+            <label for="virtual_display_mode" class="form-label">{{ $t('config.virtual_display_mode') }}</label>
+            <select id="virtual_display_mode" class="form-select" v-model.number="config.virtual_display_mode"
+                    :disabled="!['enabled', 'true', true].includes(config.virtual_display_enabled)">
+              <option :value="1">{{ $t('config.virtual_display_mode_extend') }}</option>
+              <option :value="2">{{ $t('config.virtual_display_mode_exclusive') }}</option>
+            </select>
+            <div class="form-text">{{ $t('config.virtual_display_mode_desc') }}</div>
+          </div>
+        </div></div>
+      </template>
+    </PlatformLayout>
+
     <DisplayDeviceOptions
       :platform="platform"
       :config="config"

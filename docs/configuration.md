@@ -1079,6 +1079,20 @@ editing the `conf` file in a text editor. Use the examples as reference.
     </tr>
 </table>
 
+### virtual_display_enabled
+
+Windows only. Create a virtual display when the client does not specify `virtualDisplay`.
+Requires the installed virtual display driver. Default: `disabled`.
+An explicit client request (`0` disabled, `1` extended, `2` exclusive) always wins.
+When disabled, existing per-application virtual-display settings remain supported.
+Changes apply to the next new streaming session.
+
+### virtual_display_mode
+
+Windows only. Default: `1` (extend the desktop). Set `2` to use only the virtual display.
+Used when `virtual_display_enabled` is enabled and the client provides no preference.
+The previous display configuration is restored through the existing session cleanup.
+
 ### dd_configuration_option
 
 <table>

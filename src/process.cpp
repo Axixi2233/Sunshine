@@ -36,6 +36,7 @@
 #include "system_tray.h"
 #include "utility.h"
 #include "uuid.h"
+#include "virtual_display_policy.h"
 
 #ifdef _WIN32
   #include "platform/windows/virtual_display.h"
@@ -99,8 +100,8 @@ namespace proc {
 
     std::string sanitize_virtual_display_identity(std::string value, const std::string_view fallback) {
       value.erase(std::remove_if(std::begin(value), std::end(value), [](unsigned char c) {
-        return !std::isalnum(c);
-      }),
+                    return !std::isalnum(c);
+                  }),
                   std::end(value));
 
       if (value.empty()) {
@@ -129,30 +130,27 @@ namespace proc {
       return "unknown"sv;
     }
 
+    /**
+     * @brief Resolve virtual display creation with client preferences taking priority.
+     * @param app Application fallback settings.
+     * @param launch_session Client launch settings.
+     * @return Requested topology, or no display creation.
+     */
     std::optional<rtsp_stream::virtual_display_mode_e> resolve_virtual_display_mode(const ctx_t &app, const rtsp_stream::launch_session_t &launch_session) {
-      if (launch_session.virtual_display_mode.has_value()) {
-        if (*launch_session.virtual_display_mode == rtsp_stream::virtual_display_mode_e::none) {
-          return std::nullopt;
-        }
-
-        return launch_session.virtual_display_mode;
-      }
-
-      if (app.virtual_display) {
-        return rtsp_stream::virtual_display_mode_e::extend;
-      }
-
-      return std::nullopt;
+      const auto client = launch_session.virtual_display_mode ? std::optional<int>(static_cast<int>(*launch_session.virtual_display_mode)) : std::nullopt;
+      const auto mode = virtual_display_policy::resolve(client, config::video.virtual_display_enabled, config::video.virtual_display_mode, app.virtual_display);
+      return mode == 0 ? std::nullopt : std::optional(static_cast<rtsp_stream::virtual_display_mode_e>(mode));
     }
 
-    std::optional<config::video_t::dd_t::config_option_e> resolve_virtual_display_configuration_override(const rtsp_stream::launch_session_t &launch_session) {
+    /**
+     * @brief Map the resolved topology to display preparation settings.
+     * @param mode Effective virtual display mode.
+     * @return Configuration override for an enabled virtual display.
+     */
+    std::optional<config::video_t::dd_t::config_option_e> resolve_virtual_display_configuration_override(rtsp_stream::virtual_display_mode_e mode) {
       using config_option_e = config::video_t::dd_t::config_option_e;
 
-      if (!launch_session.virtual_display_mode.has_value()) {
-        return std::nullopt;
-      }
-
-      switch (*launch_session.virtual_display_mode) {
+      switch (mode) {
         case rtsp_stream::virtual_display_mode_e::none:
           return std::nullopt;
         case rtsp_stream::virtual_display_mode_e::extend:
@@ -717,7 +715,7 @@ namespace proc {
     }
 
     config::video.output_name = device_id;
-    if (const auto configuration_override {resolve_virtual_display_configuration_override(*launch_session)}; configuration_override.has_value()) {
+    if (const auto configuration_override {resolve_virtual_display_configuration_override(mode)}; configuration_override.has_value()) {
       config::video.dd.configuration_option = *configuration_override;
     }
 

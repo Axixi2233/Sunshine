@@ -121,6 +121,8 @@ namespace config {
     std::string encoder;  ///< Encoder backend name selected by configuration.
     std::string adapter_name;  ///< Display adapter name selected in configuration.
     std::string output_name;  ///< Display output name selected in configuration.
+    bool virtual_display_enabled;  ///< Enable a virtual display when the client has no preference.
+    int virtual_display_mode;  ///< Default topology: 1 extends, 2 uses only the virtual display.
 
     /**
      * @brief Display-device integration settings.
