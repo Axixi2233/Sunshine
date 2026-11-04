@@ -617,6 +617,7 @@ namespace util {
 
   /**
    * @brief Convert from hex.
+   * @details Excess high-order bytes are discarded to fit the destination type.
    *
    * @param hex Hexadecimal text to decode.
    * @param rev Whether bytes should be emitted in reverse order.
@@ -642,7 +643,8 @@ namespace util {
       return true;
     };
 
-    auto buf_size = std::count_if(std::begin(hex), std::end(hex), is_convertable) / 2;
+    // Retain only low-order bytes that fit in the destination object.
+    auto buf_size = std::min<std::size_t>(std::count_if(std::begin(hex), std::end(hex), is_convertable) / 2, sizeof(T));
     auto padding = sizeof(T) - buf_size;
 
     const char *data = hex.data() + hex.size() - 1;
