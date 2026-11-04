@@ -911,6 +911,26 @@ editing the `conf` file in a text editor. Use the examples as reference.
     </tr>
 </table>
 
+### mic_uplink
+
+Allow an authenticated streaming client to send microphone audio to the host.
+Credentials are issued through `/mic-uplink` only after the client's stream has started.
+This option is supported on Windows and is enabled by default.
+
+@code{}
+mic_uplink = enabled
+@endcode
+
+### mic_uplink_device
+
+Windows render endpoint receiving decoded client microphone audio.
+The default is `CABLE Input`. With VB-CABLE installed, applications record the forwarded audio
+from `CABLE Output`. VB-CABLE must be installed separately.
+
+@code{}
+mic_uplink_device = CABLE Input
+@endcode
+
 ### adapter_name
 
 <table>
