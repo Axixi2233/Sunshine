@@ -981,7 +981,7 @@ namespace rtsp_stream {
        */
       if (x == audio::SURROUND51 || x == audio::SURROUND71) {
         std::copy_n(mapping_p, stream_config.channelCount, mapping);
-        std::rotate(mapping + 3, mapping + 4, mapping + audio::MAX_STREAM_CONFIG);
+        std::rotate(mapping + 3, mapping + 4, mapping + stream_config.channelCount);
 
         mapping_p = mapping;
       }
