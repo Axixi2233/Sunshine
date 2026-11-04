@@ -49,12 +49,12 @@ set(CPACK_NSIS_INSTALLED_ICON_NAME "${CMAKE_PROJECT_NAME}.exe")
 set(CPACK_NSIS_CREATE_ICONS_EXTRA
         "${CPACK_NSIS_CREATE_ICONS_EXTRA}
         SetOutPath '\$INSTDIR'
-        CreateShortCut '\$SMPROGRAMS\\\\$STARTMENU_FOLDER\\\\${CMAKE_PROJECT_NAME}.lnk' \
+        CreateShortCut '\$SMPROGRAMS\\\\$STARTMENU_FOLDER\\\\StarCore星核.lnk' \
             '\$INSTDIR\\\\${CMAKE_PROJECT_NAME}.exe' '--shortcut'
         ")
 set(CPACK_NSIS_DELETE_ICONS_EXTRA
         "${CPACK_NSIS_DELETE_ICONS_EXTRA}
-        Delete '\$SMPROGRAMS\\\\$MUI_TEMP\\\\${CMAKE_PROJECT_NAME}.lnk'
+        Delete '\$SMPROGRAMS\\\\$MUI_TEMP\\\\StarCore星核.lnk'
         ")
 
 # Checking for previous installed versions

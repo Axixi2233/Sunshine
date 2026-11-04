@@ -3,6 +3,7 @@
  * @brief Windows resource file.
  */
 #include "winver.h"
+#pragma code_page(65001)
 
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
@@ -19,10 +20,10 @@ BEGIN
         BLOCK "040904E4"
         BEGIN
             VALUE "CompanyName",      TOSTRING(PROJECT_VENDOR)
-            VALUE "FileDescription",  TOSTRING(PROJECT_NAME)
+            VALUE "FileDescription",  L"StarCore星核"
             VALUE "FileVersion",      TOSTRING(PROJECT_VERSION)
             VALUE "InternalName",     TOSTRING(PROJECT_NAME)
-            VALUE "ProductName",      TOSTRING(PROJECT_NAME)
+            VALUE "ProductName",      L"StarCore星核"
             VALUE "ProductVersion",   TOSTRING(PROJECT_VERSION)
             VALUE "LegalCopyright",   "https://raw.githubusercontent.com/LizardByte/Sunshine/master/LICENSE"
         END

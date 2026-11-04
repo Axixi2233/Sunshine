@@ -2,6 +2,7 @@ import {createI18n} from "vue-i18n";
 
 // Import only the fallback language files
 import en from './public/assets/locale/en.json'
+import { brandText } from './branding'
 
 export default async function() {
     let r = await (await fetch("./api/configLocale")).json();
@@ -21,6 +22,7 @@ export default async function() {
     const i18n = createI18n({
         locale: locale, // set locale
         fallbackLocale: 'en', // set fallback locale
+        postTranslation: brandText,
         messages: messages
     })
     return i18n;

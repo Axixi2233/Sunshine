@@ -54,6 +54,7 @@
   #include <tray.h>
 
   // local includes
+  #include "branding.h"
   #include "confighttp.h"
   #include "display_device.h"
   #include "logging.h"
@@ -131,11 +132,11 @@ namespace system_tray {
   // Tray menu
   static struct tray tray = {
     .icon = TRAY_ICON,
-    .tooltip = PROJECT_NAME,
+    .tooltip = branding::display_name,
     .menu =
       (struct tray_menu[]) {
         // todo - use boost/locale to translate menu strings
-        {.text = "Open Sunshine", .cb = tray_open_ui_cb},
+        {.text = branding::open_label, .cb = tray_open_ui_cb},
         {.text = "-"},
         {.text = "Donate", .cb = tray_credits_cb},
         {.text = "-"},
@@ -162,7 +163,7 @@ namespace system_tray {
 
   void reset_tray_data_for_testing() {
     tray.icon = tray.allIconPaths[0];
-    tray.tooltip = PROJECT_NAME;
+    tray.tooltip = branding::display_name;
     tray.notification_icon = nullptr;
     tray.notification_text = nullptr;
     tray.notification_title = nullptr;
@@ -303,7 +304,7 @@ namespace system_tray {
 
     tray_set_log_callback(qt_log_to_boost);
 
-    tray_set_app_info(PROJECT_NAME, PROJECT_NAME, PROJECT_FQDN);
+    tray_set_app_info(PROJECT_NAME, branding::display_name, PROJECT_FQDN);
 
     if (tray_init(&tray) < 0) {
       BOOST_LOG(warning) << "Failed to create system tray"sv;
@@ -392,7 +393,7 @@ namespace system_tray {
     tray.notification_icon = TRAY_ICON;
     tray.notification_title = "Application Stopped";
     tray.notification_text = msg.c_str();
-    tray.tooltip = PROJECT_NAME;
+    tray.tooltip = branding::display_name;
     tray_update(&tray);
   }
 
@@ -411,7 +412,7 @@ namespace system_tray {
     tray.notification_title = "Incoming Pairing Request";
     tray.notification_text = "Click here to complete the pairing process";
     tray.notification_icon = TRAY_ICON_LOCKED;
-    tray.tooltip = PROJECT_NAME;
+    tray.tooltip = branding::display_name;
     tray.notification_cb = []() {
       launch_ui("/pin");
     };
