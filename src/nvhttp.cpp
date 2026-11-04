@@ -357,17 +357,44 @@ namespace nvhttp {
    * @param cert Certificate data or object used by the operation.
    */
   void add_authorized_client(const std::string &name, std::string &&cert) {
+    auto certificate = crypto::x509(cert);
+    if (!certificate) {
+      return;
+    }
     client_t &client = client_root;
     named_cert_t named_cert;
     named_cert.name = name;
-    named_cert.cert = std::move(cert);
+    named_cert.cert = crypto::pem(certificate);
     named_cert.uuid = uuid_util::uuid_t::generate().string();
+    // Re-pairing replaces every legacy record with the same X.509 identity.
+    std::erase_if(client.named_devices, [&certificate](const named_cert_t &existing) {
+      auto existing_certificate = crypto::x509(existing.cert);
+      return existing_certificate && X509_cmp(existing_certificate.get(), certificate.get()) == 0;
+    });
     client.named_devices.emplace_back(named_cert);
 
     if (!config::sunshine.flags[config::flag::FRESH_STATE]) {
       save_state();
     }
   }
+
+#ifdef SUNSHINE_TESTS
+  /**
+   * @brief Run client database tests without changing persisted or existing client state.
+   * @param test Assertions to execute against an empty in-memory database.
+   */
+  void test_with_isolated_clients(const std::function<void()> &test) {
+    auto original = std::move(client_root);
+    const auto flags = config::sunshine.flags;
+    auto restore = util::fail_guard([&]() {
+      client_root = std::move(original);
+      config::sunshine.flags = flags;
+    });
+    client_root = {};
+    config::sunshine.flags.set(config::flag::FRESH_STATE);
+    test();
+  }
+#endif
 
   /**
    * @brief Create launch session.
@@ -468,6 +495,20 @@ namespace nvhttp {
 
   void remove_session(const pair_session_t &sess) {
     map_id_sess.erase(sess.client.uniqueID);
+  }
+
+  /**
+   * @brief Insert a pairing attempt, replacing an abandoned handshake after PIN approval.
+   * @param session Fresh client identity and handshake state.
+   * @return New session, or the existing session still waiting for PIN approval.
+   */
+  pair_session_t &insert_pair_session(pair_session_t &&session) {
+    const auto id = session.client.uniqueID;
+    const auto existing = map_id_sess.find(id);
+    if (existing != map_id_sess.end() && existing->second.last_phase != PAIR_PHASE::NONE) {
+      map_id_sess.erase(existing);
+    }
+    return map_id_sess.emplace(id, std::move(session)).first->second;
   }
 
   /**
@@ -768,22 +809,22 @@ namespace nvhttp {
         sess.client.cert = util::from_hex_vec(get_arg(args, "clientcert"), true);
 
         BOOST_LOG(debug) << sess.client.cert;
-        auto ptr = map_id_sess.emplace(sess.client.uniqueID, std::move(sess)).first;
+        auto &pending_session = insert_pair_session(std::move(sess));
 
-        ptr->second.async_insert_pin.salt = std::move(get_arg(args, "salt"));
+        pending_session.async_insert_pin.salt = std::move(get_arg(args, "salt"));
         if (config::sunshine.flags[config::flag::PIN_STDIN]) {
           std::string pin;
 
           std::cout << "Please insert pin: "sv;
           std::getline(std::cin, pin);
 
-          getservercert(ptr->second, tree, pin);
+          getservercert(pending_session, tree, pin);
           return;
         } else {
 #if defined SUNSHINE_TRAY && SUNSHINE_TRAY >= 1
           system_tray::update_tray_require_pin();
 #endif
-          ptr->second.async_insert_pin.response = std::move(response);
+          pending_session.async_insert_pin.response = std::move(response);
 
           fg.disable();
           return;
