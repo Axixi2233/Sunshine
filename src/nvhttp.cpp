@@ -21,6 +21,7 @@
 
 // local includes
 #include "config.h"
+#include "display_control.h"
 #include "display_device.h"
 #include "file_handler.h"
 #include "globals.h"
@@ -87,8 +88,32 @@ namespace nvhttp {
     std::function<int(SSL *)> verify;  ///< Callback that validates a client's TLS certificate after handshake.
     std::function<void(std::shared_ptr<Response>, std::shared_ptr<Request>)> on_verify_failed;  ///< Handler used to return the pairing challenge when client verification fails.
 
+    /**
+     * @brief Read the verified certificate from the TLS connection carrying this request.
+     * @param request Incoming HTTPS request.
+     * @return Peer certificate PEM, or an empty string after disconnection.
+     */
+    std::string verified_certificate(const std::shared_ptr<Request> &request) {
+      std::lock_guard lock(verified_mutex);
+      std::erase_if(verified_connections, [](const auto &connection) {
+        return connection.expired();
+      });
+      for (const auto &weak : verified_connections) {
+        if (const auto connection = weak.lock()) {
+          SimpleWeb::error_code error;
+          if (connection->socket->lowest_layer().remote_endpoint(error) == request->remote_endpoint() && !error) {
+            crypto::x509_t certificate {SSL_get_peer_certificate(connection->socket->native_handle())};
+            return certificate ? crypto::pem(certificate) : std::string {};
+          }
+        }
+      }
+      return {};
+    }
+
   protected:
     boost::asio::ssl::context context;  ///< TLS server context configured with Sunshine's certificate and protocol policy.
+    std::mutex verified_mutex;  ///< Protects active verified TLS connection references.
+    std::vector<std::weak_ptr<Connection>> verified_connections;  ///< Connections available for request-scoped certificate lookup.
 
     /**
      * @brief Enable client-certificate verification after the listening socket is bound.
@@ -138,6 +163,13 @@ namespace nvhttp {
               if (verify && !verify(session->connection->socket->native_handle())) {
                 this->write(session, on_verify_failed);
               } else {
+                {
+                  std::lock_guard verified_lock(verified_mutex);
+                  std::erase_if(verified_connections, [](const auto &connection) {
+                    return connection.expired();
+                  });
+                  verified_connections.push_back(session->connection);
+                }
                 this->read(session);
               }
             } else if (this->on_error) {
@@ -1294,6 +1326,37 @@ namespace nvhttp {
     rtsp_stream::launch_session_raise(launch_session);
   }
 
+  /**
+   * @brief Return displays or apply a targeted display operation for a paired running client.
+   * @param response HTTPS response.
+   * @param request Request with the client unique ID and an optional JSON operation body.
+   * @param certificate Verified certificate from this request's TLS connection.
+   */
+  void client_displays(resp_https_t response, req_https_t request, const std::string &certificate) {
+    const auto args = request->parse_query_string();
+    const auto unique_id = get_arg(args, "uniqueid");
+    const bool changing = request->method == "POST";
+    nlohmann::json result;
+    if (!stream::owns_display_session(unique_id, certificate, changing)) {
+      result = {{"status", false}, {"message", "An owned active stream is required. Display changes require a single active client."}};
+    } else if (!changing) {
+      result = display_control::inventory();
+    } else {
+      try {
+        const auto body = request->content.string();
+        if (body.size() > 4096) {
+          result = {{"status", false}, {"message", "Display request is too large."}};
+        } else {
+          result = display_control::apply(nlohmann::json::parse(body));
+        }
+      } catch (const nlohmann::json::exception &) {
+        result = {{"status", false}, {"message", "Invalid display request."}};
+      }
+    }
+    response->write(result.dump(), {{"Content-Type", "application/json"}, {"Cache-Control", "no-store"}});
+    response->close_connection_after_response = true;
+  }
+
   void microphone_uplink(resp_https_t response, req_https_t request) {
     print_req<SunshineHTTPS>(request);
 
@@ -1505,6 +1568,12 @@ namespace nvhttp {
       resume(host_audio, resp, req);
     };
     https_server.resource["^/mic-uplink$"]["GET"] = microphone_uplink;
+    https_server.resource["^/display-devices$"]["GET"] = [&https_server](auto response, auto request) {
+      client_displays(response, request, https_server.verified_certificate(request));
+    };
+    https_server.resource["^/display-devices$"]["POST"] = [&https_server](auto response, auto request) {
+      client_displays(response, request, https_server.verified_certificate(request));
+    };
     https_server.resource["^/cancel$"]["GET"] = cancel;
 
     https_server.config.reuse_address = true;

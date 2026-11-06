@@ -26,6 +26,7 @@ extern "C" {
 // local includes
 #include "cbs.h"
 #include "config.h"
+#include "display_control.h"
 #include "display_device.h"
 #include "globals.h"
 #include "input.h"
@@ -1579,6 +1580,7 @@ namespace video {
       return;
     }
     display_wp = disp;
+    display_control::report_capture(display_names[display_p], display_names);
 
     constexpr auto capture_buffer_size = 12;
     std::list<std::shared_ptr<platf::img_t>> imgs(capture_buffer_size);
@@ -1772,11 +1774,14 @@ namespace video {
 
               // Process any pending display switch with the new list of displays
               if (switch_display_event->peek()) {
-                display_p = std::clamp(*switch_display_event->pop(), 0, static_cast<int>(display_names.size()) - 1);
+                display_p = display_control::resolve_switch(*switch_display_event->pop(), display_names, display_p);
               }
 
               // reset_display() will sleep between retries
               reset_display(disp, encoder.platform_formats->dev_type, display_names[display_p], capture_ctxs.front().config);
+              if (disp) {
+                display_control::report_capture(display_names[display_p], display_names);
+              }
               if (disp) {
                 break;
               }
@@ -2700,11 +2705,14 @@ namespace video {
 
       // Process any pending display switch with the new list of displays
       if (switch_display_event->peek()) {
-        display_p = std::clamp(*switch_display_event->pop(), 0, static_cast<int>(display_names.size()) - 1);
+        display_p = display_control::resolve_switch(*switch_display_event->pop(), display_names, display_p);
       }
 
       // reset_display() will sleep between retries
       reset_display(disp, encoder.platform_formats->dev_type, display_names[display_p], synced_session_ctxs.front()->config);
+      if (disp) {
+        display_control::report_capture(display_names[display_p], display_names);
+      }
       if (disp) {
         break;
       }

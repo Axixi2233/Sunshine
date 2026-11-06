@@ -2792,6 +2792,26 @@ namespace stream {
     }
   }  // namespace session
 
+  bool owns_display_session(std::string_view unique_id, std::string_view client_cert, bool exclusive) {
+    if (unique_id.empty() || client_cert.empty()) {
+      return false;
+    }
+    auto ref = broadcast.ref();
+    if (!ref) {
+      return false;
+    }
+    auto lock = ref->control_server._sessions.lock();
+    int running = 0;
+    bool owned = false;
+    for (const auto *session : *ref->control_server._sessions) {
+      if (session && session->state.load(std::memory_order_relaxed) == session::state_e::RUNNING) {
+        ++running;
+        owned |= session->unique_id == unique_id && session->client_cert == client_cert;
+      }
+    }
+    return owned && (!exclusive || running == 1);
+  }
+
   std::optional<mic_uplink_info_t> request_mic_uplink(std::string_view unique_id, std::string_view client_cert) {
     if (unique_id.empty() || client_cert.empty()) {
       return std::nullopt;

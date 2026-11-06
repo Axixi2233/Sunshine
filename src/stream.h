@@ -110,4 +110,12 @@ namespace stream {
   }  // namespace session
 
   std::optional<mic_uplink_info_t> request_mic_uplink(std::string_view unique_id, std::string_view client_cert);
+  /**
+   * @brief Check paired ownership of an active session for display management.
+   * @param unique_id Client unique ID.
+   * @param client_cert Verified pairing certificate.
+   * @param exclusive Require that this is the only running session for desktop-changing operations.
+   * @return Whether the caller owns a suitable running session.
+   */
+  bool owns_display_session(std::string_view unique_id, std::string_view client_cert, bool exclusive);
 }  // namespace stream
