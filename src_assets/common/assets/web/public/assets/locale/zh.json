@@ -1,4 +1,12 @@
 {
+  "login": {
+    "title": "登录 StarCore星核",
+    "description": "请输入账号和密码，以管理这台主机。",
+    "signing_in": "正在登录…",
+    "invalid_credentials": "账号或密码不正确。",
+    "failed": "无法登录，请检查连接后重试。",
+    "logout_failed": "无法退出登录，请重试。"
+  },
   "_common": {
     "all": "全部",
     "apply": "应用",
@@ -108,6 +116,16 @@
     "working_dir_desc": "应传递给进程的工作目录。例如，某些应用程序使用工作目录搜索配置文件。如果不设置，Sunshine 将默认使用命令的父目录"
   },
   "config": {
+    "virtual_display_enabled": "启用虚拟显示器",
+    "virtual_display_enabled_desc": "客户端未指定显示器偏好时，为串流创建虚拟显示器。默认不启用，需要安装虚拟显示器驱动。",
+    "virtual_display_mode": "虚拟显示器模式",
+    "virtual_display_mode_extend": "扩展",
+    "virtual_display_mode_exclusive": "仅虚拟显示器",
+    "virtual_display_mode_desc": "以客户端明确请求为准，包括客户端要求禁用虚拟显示器的情况。修改将在下一次新建串流会话时生效。",
+    "amd_max_au_size": "AMF 最大编码帧大小（位）",
+    "amd_max_au_size_desc": "限制 H.264 或 H.265（HEVC）单个编码访问单元的大小，单位为位（bit）。留空或设为 -1 使用 AMF 默认值。仅在编码帧过大、超过前向纠错（FEC）容量时使用。上限取决于数据包大小和 FEC 百分比，而不是码率或帧率；具体计算方式请参阅文档。",
+    "fp16_sdr_gamma_encoded": "将 FP16 SDR 画面视为已进行伽马编码",
+    "fp16_sdr_gamma_encoded_desc": "显示器处于 SDR 模式、桌面以 FP16 格式捕获时，如果串流画面发白或高光过曝，可尝试启用。日志中的桌面格式应为 DXGI_FORMAT_R16G16B16A16_FLOAT。启用后将跳过这类画面的 sRGB 曲线转换。其他情况请保持关闭，否则线性 FP16 画面可能变暗。此选项不影响 HDR 模式。",
     "adapter_name": "适配器名称",
     "adapter_name_desc_linux_1": "手动指定用于捕获的 GPU。",
     "adapter_name_desc_linux_2": "找到所有能够使用 VAAPI 的设备",

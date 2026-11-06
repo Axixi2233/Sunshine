@@ -2,9 +2,9 @@
 .SYNOPSIS
 Rebuilds Windows and WebUI icon formats from the unmodified StarCore Android artwork.
 .PARAMETER Source
-Path to StarCore Android's icon_app.png.
+Path to StarCore Android's transparent foreground.png.
 #>
-param([string]$Source = 'E:/project/github/StarCoreAndroid/app/src/main/res/mipmap-xhdpi/icon_app.png')
+param([string]$Source = 'E:/project/github/StarCoreAndroid/app/src/main/res/mipmap-xhdpi/foreground.png')
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 $repo = Split-Path $PSScriptRoot -Parent
@@ -17,7 +17,8 @@ try {
         $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
         $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
         $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-        $graphics.DrawImage($original, 0, 0, 256, 256)
+        # Render the crystal's foreground bounds into the icon viewport with a small safety margin.
+        $graphics.DrawImage($original, [System.Drawing.Rectangle]::new(8, 8, 240, 240), 138, 152, 721, 719, [System.Drawing.GraphicsUnit]::Pixel)
         if ($state -ne 'default') {
             $graphics.FillEllipse([System.Drawing.Brushes]::Black, 158, 158, 96, 96)
             $graphics.FillEllipse([System.Drawing.Brushes]::Gold, 164, 164, 84, 84)

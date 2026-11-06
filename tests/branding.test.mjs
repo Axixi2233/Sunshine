@@ -4,6 +4,17 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { brandText, productName } from '../src_assets/common/assets/web/branding.js';
 
+test('Simplified Chinese covers login and newly added display and encoder settings', () => {
+  const zh = JSON.parse(readFileSync(new URL('../src_assets/common/assets/web/public/assets/locale/zh.json', import.meta.url), 'utf8'));
+  const en = JSON.parse(readFileSync(new URL('../src_assets/common/assets/web/public/assets/locale/en.json', import.meta.url), 'utf8'));
+  for (const key of Object.keys(en.login)) {
+    assert.match(zh.login[key], /[\u3400-\u9fff]/, key);
+  }
+  for (const key of Object.keys(en.config).filter(key => /^(virtual_display_|amd_max_au_size|fp16_sdr_gamma_encoded)/.test(key))) {
+    assert.match(zh.config[key], /[\u3400-\u9fff]/, key);
+  }
+});
+
 test('product name replaces both original and fork names in translated text', () => {
   assert.equal(productName, 'StarCore星核');
   assert.equal(brandText('你好，Sunshine·阿西西！'), '你好，StarCore星核！');
