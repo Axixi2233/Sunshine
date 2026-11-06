@@ -29,6 +29,7 @@
     </div>
 
     <!-- ViGEmBus Warning -->
+    <usb-ip-driver v-if="platform === 'windows'" warning-only></usb-ip-driver>
     <div class="alert alert-warning my-4" v-if="platform === 'windows' && controllerEnabled && vigembus && (!vigembus.installed || !vigembus.version_compatible)">
       <div>
         <div class="d-flex align-items-center mb-3">
@@ -158,6 +159,7 @@
   import { initApp } from './init'
   import Navbar from './Navbar.vue'
   import ResourceCard from './ResourceCard.vue'
+  import UsbIpDriver from './UsbIpDriver.vue'
   import ClientDownloads from './ClientDownloads.vue'
   import SunshineVersion from './sunshine_version'
   import {
@@ -187,6 +189,7 @@
     components: {
       Navbar,
       ResourceCard,
+      UsbIpDriver,
       ClientDownloads,
       AlertCircle,
       AlertTriangle,

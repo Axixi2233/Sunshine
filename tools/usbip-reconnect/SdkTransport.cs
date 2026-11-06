@@ -14,11 +14,14 @@ internal sealed class SdkTransport : IUsbIpTransport
     private readonly MethodInfo detach;
 
     /// <summary>Resolve transport operations against the embedded, pinned SDK.</summary>
-    public SdkTransport(WatchOptions options)
+    public SdkTransport(WatchOptions options) : this(options.Host.ToString(), WatchOptions.Port) {}
+
+    /// <summary>Use a loopback bridge for TLS; callers cannot change the fixed exported bus identity.</summary>
+    public SdkTransport(string host, int port)
     {
         var type = Sdk.GetType("HIDMaestro.Internal.Usbip.VhciClient", throwOnError: true)!;
         Type[] signature = { typeof(string), typeof(int), typeof(string) };
-        location = new object[] { options.Host.ToString(), WatchOptions.Port, WatchOptions.BusId };
+        location = new object[] { host, port, WatchOptions.BusId };
         find = Method(type, "FindLocation", signature);
         attach = Method(type, "Attach", signature);
         stop = Method(type, "StopAttachAttempts", signature);

@@ -530,6 +530,7 @@ namespace stream {
     config_t config;  ///< Stream or encoder configuration captured for the worker.
     std::string unique_id;  ///< Moonlight unique ID used to claim microphone uplink.
     bool usbip_requested {};  ///< Whether this client explicitly enabled USB/IP mode.
+    std::string usbip_token;  ///< Session-owned TLS export authentication secret.
     std::atomic<std::shared_ptr<usbip::session_t>> usbip_importer;  ///< Importer shared safely with the stop path.
 
     safe::mail_t mail;  ///< Mailbox used to distribute packets and lifecycle events.
@@ -2702,7 +2703,7 @@ namespace stream {
       session.audioThread = std::jthread {audioThread, &session};
       session.videoThread = std::jthread {videoThread, &session};
 
-      session.usbip_importer.store(usbip::start(session.usbip_requested, addr_string, session.launch_session_id));
+      session.usbip_importer.store(usbip::start(session.usbip_requested, addr_string, session.launch_session_id, session.client_cert, session.usbip_token));
       session.state.store(state_e::RUNNING, std::memory_order_relaxed);
 
       // If this is the first session, invoke the platform callbacks
@@ -2731,6 +2732,7 @@ namespace stream {
       session->config = config;
       session->unique_id = launch_session.unique_id;
       session->usbip_requested = launch_session.usbip_mode;
+      session->usbip_token = launch_session.usbip_token;
 
       session->control.connect_data = launch_session.control_connect_data;
       session->control.feedback_queue = mail->queue<platf::gamepad_feedback_msg_t>(mail::gamepad_feedback);

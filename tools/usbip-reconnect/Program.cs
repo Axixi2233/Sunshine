@@ -12,6 +12,11 @@ internal static class Program
     private static async Task<int> Main(string[] args)
     {
         try {
+            if (args.SequenceEqual(new[] { "--driver-status" })) {
+                Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { state = DriverMaintenance.Classify(DriverMaintenance.Inspect()) }));
+                return 0;
+            }
+            if (args.SequenceEqual(new[] { "--repair-driver" })) return DriverMaintenance.Repair(Log);
             if (args.SequenceEqual(new[] { "--prepare-driver" })) {
                 SdkTransport.Prepare(Log);
                 Log("USB/IP transport is ready");
@@ -23,24 +28,29 @@ internal static class Program
                 return 0;
             }
             if (!WatchOptions.TryParse(args, out var options) || options is null) {
-                Console.Error.WriteLine("Usage: usbip-reconnect --prepare-driver | --check-sdk | --watch <private IPv4> <Sunshine PID> <session ID>");
+                Console.Error.WriteLine("Usage: usbip-reconnect --prepare-driver | --check-sdk | --watch <local IPv4/IPv6> <Sunshine PID> <session ID>");
                 return 2;
             }
             using var owner = Process.GetProcessById(options.OwnerPid);
             if (!owner.ProcessName.Equals("sunshine", StringComparison.OrdinalIgnoreCase)) return 2;
             using var stopEvent = EventWaitHandle.OpenExisting(options.StopEvent);
+            var credentials = options.Tls ? await TlsCredentials.Read(Console.In) : null;
             using var singleton = new EventWaitHandle(false, EventResetMode.ManualReset,
                     $"Local\\StarCoreUsbIp-{options.Host}-{WatchOptions.Port}-{WatchOptions.BusId}", out bool createdNew);
             if (!createdNew) { Log("This USB/IP export is already watched"); return 2; }
-            Log($"Watching {options.Host}:{WatchOptions.Port}/{WatchOptions.BusId} for Sunshine PID {options.OwnerPid}, session {options.SessionId}");
+            Log($"Watching {options.Endpoint}/{WatchOptions.BusId} for Sunshine PID {options.OwnerPid}, session {options.SessionId}");
             SdkTransport.Prepare(Log);
             if (owner.HasExited || stopEvent.WaitOne(0)) {
                 Log("Stream ended while its USB/IP driver was being prepared");
                 return 0;
             }
             using var cancellation = new CancellationTokenSource();
-            var watcher = new ReconnectWatcher(new SdkTransport(options),
-                    _ => IsExportReady(options.Host, WatchOptions.Port, WatchOptions.BusId), Log, TimeSpan.FromMilliseconds(500));
+            await using var proxy = credentials is null ? null : new TlsUsbIpProxy(options.Host, WatchOptions.Port, credentials, Log);
+            var driverHost = proxy is null ? options.Host : IPAddress.Loopback;
+            int driverPort = proxy?.LocalPort ?? WatchOptions.Port;
+            if (proxy is not null) Log("USB/IP TLS enabled with the paired Android certificate and session authentication");
+            var watcher = new ReconnectWatcher(new SdkTransport(driverHost.ToString(), driverPort),
+                    _ => IsExportReady(driverHost, driverPort, WatchOptions.BusId, options.Tls ? 5000 : 700), Log, TimeSpan.FromMilliseconds(500));
             var task = Task.Run(() => watcher.Run(cancellation.Token));
             while (!task.IsCompleted && !owner.HasExited && !stopEvent.WaitOne(0)) await Task.Delay(100);
             cancellation.Cancel();
@@ -55,10 +65,10 @@ internal static class Program
     }
 
     /// <summary>Probe DEVLIST with a bounded timeout before issuing a potentially blocking driver import.</summary>
-    private static async Task<bool> IsExportReady(IPAddress host, int port, string busId)
+    internal static async Task<bool> IsExportReady(IPAddress host, int port, string busId, int timeoutMs = 700)
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(700));
-        using var socket = new TcpClient { NoDelay = true };
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(timeoutMs));
+        using var socket = new TcpClient(host.AddressFamily) { NoDelay = true };
         try
         {
             await socket.ConnectAsync(host, port, timeout.Token);

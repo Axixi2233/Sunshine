@@ -35,6 +35,7 @@
 #include "rtsp.h"
 #include "stream.h"
 #include "system_tray.h"
+#include "usbip.h"
 #include "utility.h"
 #include "uuid.h"
 #include "video.h"
@@ -433,9 +434,10 @@ namespace nvhttp {
    *
    * @param host_audio Host audio.
    * @param args Arguments forwarded to the callable or parser.
+   * @param peer Authenticated client's network address used to choose direct LAN or public TLS transport.
    * @return Constructed launch session object.
    */
-  std::shared_ptr<rtsp_stream::launch_session_t> make_launch_session(bool host_audio, const args_t &args) {
+  std::shared_ptr<rtsp_stream::launch_session_t> make_launch_session(bool host_audio, const args_t &args, const std::string &peer) {
     auto launch_session = std::make_shared<rtsp_stream::launch_session_t>();
 
     launch_session->id = ++session_id_counter;
@@ -498,6 +500,9 @@ namespace nvhttp {
     }
     launch_session->rtsp_url_scheme = launch_session->rtsp_cipher ? "rtspenc://"s : "rtsp://"s;
     launch_session->client_cert = last_verified_client_cert;
+    if (launch_session->usbip_mode && get_arg(args, "usbipTls", "0") == "1" && !launch_session->client_cert.empty() && !usbip::is_lan_peer(peer)) {
+      launch_session->usbip_token = util::hex_vec(crypto::rand(32));
+    }
 
     // Generate the unique identifiers for this connection that we will send later during RTSP handshake
     unsigned char raw_payload[8];
@@ -1153,7 +1158,7 @@ namespace nvhttp {
     }
 
     host_audio = util::from_view(get_arg(args, "localAudioPlayMode"));
-    auto launch_session = make_launch_session(host_audio, args);
+    auto launch_session = make_launch_session(host_audio, args, request->remote_endpoint().address().to_string());
     BOOST_LOG(info) << "Launch request received for app id ["sv << appid << ']';
 
     if (rtsp_stream::session_count() == 0) {
@@ -1219,6 +1224,14 @@ namespace nvhttp {
       )
     );
     tree.put("root.gamesession", 1);
+    if (!launch_session->usbip_token.empty()) {
+      tree.put("root.axiUsbIpTls", 1);
+      tree.put("root.axiUsbIpToken", launch_session->usbip_token);
+    }
+    if (const auto source = usbip::import_source(launch_session->usbip_mode, request->remote_endpoint().address().to_string(), !launch_session->usbip_token.empty())) {
+      tree.put("root.axiUsbIpHost", *source);
+      BOOST_LOG(info) << "USB/IP IPv6 import source advertised to paired client: " << *source;
+    }
 
     rtsp_stream::launch_session_raise(launch_session);
 
@@ -1277,7 +1290,7 @@ namespace nvhttp {
     if (no_active_sessions && args.find("localAudioPlayMode"s) != std::end(args)) {
       host_audio = util::from_view(get_arg(args, "localAudioPlayMode"));
     }
-    const auto launch_session = make_launch_session(host_audio, args);
+    const auto launch_session = make_launch_session(host_audio, args, request->remote_endpoint().address().to_string());
 
     if (no_active_sessions) {
       // We want to prepare display only if there are no active sessions at
@@ -1323,6 +1336,14 @@ namespace nvhttp {
       )
     );
     tree.put("root.resume", 1);
+    if (!launch_session->usbip_token.empty()) {
+      tree.put("root.axiUsbIpTls", 1);
+      tree.put("root.axiUsbIpToken", launch_session->usbip_token);
+    }
+    if (const auto source = usbip::import_source(launch_session->usbip_mode, request->remote_endpoint().address().to_string(), !launch_session->usbip_token.empty())) {
+      tree.put("root.axiUsbIpHost", *source);
+      BOOST_LOG(info) << "USB/IP IPv6 import source advertised to paired client: " << *source;
+    }
 
     rtsp_stream::launch_session_raise(launch_session);
   }

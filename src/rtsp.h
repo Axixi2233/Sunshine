@@ -56,7 +56,8 @@ namespace rtsp_stream {
     uint32_t rtsp_iv_counter;  ///< Counter value mixed into encrypted RTSP IVs.
     std::string client_cert;  ///< PEM certificate for the paired Moonlight client.
     std::optional<virtual_display_mode_e> virtual_display_mode;  ///< Client override for virtual display behavior.
-    bool usbip_mode {};  ///< Explicit client request for a LAN-only USB/IP importer.
+    bool usbip_mode {};  ///< Explicit client request for USB/IP import.
+    std::string usbip_token;  ///< Per-launch TLS authentication secret, sent only over paired HTTPS and a private pipe.
   };
 
   /**

@@ -44,6 +44,7 @@
 #include "platform/mic_uplink.h"
 #include "process.h"
 #include "rtsp.h"
+#include "usbip.h"
 #include "utility.h"
 #include "uuid.h"
 #include "web_sessions.h"
@@ -244,8 +245,7 @@ namespace confighttp {
 
     // Browsers use sessions exclusively, including after logout with cached Basic credentials.
     const auto accept = request->header.find("Accept");
-    if (request->header.contains("Sec-Fetch-Mode") || request->header.contains("Cookie") ||
-        (accept != request->header.end() && accept->second.find("text/html") != std::string::npos)) {
+    if (request->header.contains("Sec-Fetch-Mode") || request->header.contains("Cookie") || (accept != request->header.end() && accept->second.find("text/html") != std::string::npos)) {
       return false;
     }
 
@@ -532,8 +532,7 @@ namespace confighttp {
     const auto origin = request->header.find("Origin");
     const auto host = request->header.find("Host");
     const auto site = request->header.find("Sec-Fetch-Site");
-    if ((site != request->header.end() && site->second == "cross-site") ||
-        (origin != request->header.end() && (host == request->header.end() || origin->second != "https://" + host->second))) {
+    if ((site != request->header.end() && site->second == "cross-site") || (origin != request->header.end() && (host == request->header.end() || origin->second != "https://" + host->second))) {
       response->write(SimpleWeb::StatusCode::client_error_forbidden);
       return false;
     }
@@ -1607,6 +1606,36 @@ namespace confighttp {
   }
 
   /**
+   * @brief Inspect USB/IP driver health without modifying any devices.
+   * @param response HTTP response.
+   * @param request Authenticated Web UI request.
+   */
+  void getUsbIpDriverStatus(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    auto result = usbip::driver_status();
+    result["streaming"] = rtsp_stream::session_count() != 0;
+    send_response(response, result);
+  }
+
+  /**
+   * @brief Start a fixed-purpose driver repair only on an idle, authenticated host.
+   * @param response HTTP response.
+   * @param request CSRF-protected Web UI request; no device IDs or commands are accepted.
+   */
+  void repairUsbIpDriver(const resp_https_t &response, const req_https_t &request) {
+    if (!authenticate(response, request) || !validate_csrf_token(response, request, get_client_id(request))) {
+      return;
+    }
+    if (rtsp_stream::session_count() != 0) {
+      send_response(response, {{"status", false}, {"error", "streaming"}});
+      return;
+    }
+    send_response(response, usbip::repair_driver());
+  }
+
+  /**
    * @brief Install ViGEmBus driver with elevated permissions.
    * @param response The HTTP response object.
    * @param request The HTTP request object.
@@ -1995,6 +2024,8 @@ namespace confighttp {
     server.resource["^/api/reset-display-device-persistence$"]["POST"] = resetDisplayDevicePersistence;
     server.resource["^/api/restart$"]["POST"] = restart;
     server.resource["^/api/vigembus/status$"]["GET"] = getViGEmBusStatus;
+    server.resource["^/api/usbip/driver/status$"]["GET"] = getUsbIpDriverStatus;
+    server.resource["^/api/usbip/driver/repair$"]["POST"] = repairUsbIpDriver;
     server.resource["^/api/vigembus/install$"]["POST"] = installViGEmBus;
     server.resource["^/api/mic-uplink/status$"]["GET"] = getMicUplinkStatus;
     server.resource["^/api/display-devices$"]["GET"] = getDisplayDevices;

@@ -15,6 +15,17 @@ internal static class LifecycleTests
             throw new Exception("Invalid owner accepted");
         Console.WriteLine("PASS session-options");
 
+        var prefixes = new[] { IPNetwork.Parse("2001:db8:1234::/64") };
+        foreach (string host in new[] { "fd12::2", "fc00::1", "fe80::1234%7", "2001:db8:1234::2" }) {
+            if (!WatchOptions.TryParse(new[] { "--watch", host, "100", "7" }, out var v6, prefixes)
+                    || v6!.Endpoint != $"[{host}]:3240") throw new Exception("Local IPv6 rejected: " + host);
+        }
+        foreach (string host in new[] { "::", "::1", "ff02::1", "fe80::1", "fec0::1", "2001:db8:5678::2",
+                "[fd00::1]", "::ffff:192.168.1.1", "::192.168.1.1", "host.local" })
+            if (WatchOptions.TryParse(new[] { "--watch", host, "100", "7" }, out _, prefixes))
+                throw new Exception("Unsafe IPv6 accepted: " + host);
+        Console.WriteLine("PASS ipv6-session-options");
+
         foreach (var scenario in new[] { "owned", "external", "replacement", "pending" }) {
             using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(4));
             var transport = new FakeTransport(scenario, cancellation);

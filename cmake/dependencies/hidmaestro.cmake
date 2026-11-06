@@ -115,6 +115,8 @@ add_custom_command(
         DEPENDS
                 "${USBIP_RECONNECT_PROJECT}"
                 "${CMAKE_SOURCE_DIR}/tools/usbip-reconnect/Program.cs"
+                "${CMAKE_SOURCE_DIR}/tools/usbip-reconnect/DriverMaintenance.cs"
+                "${CMAKE_SOURCE_DIR}/tools/usbip-reconnect/TlsUsbIpProxy.cs"
                 "${CMAKE_SOURCE_DIR}/tools/usbip-reconnect/WatchOptions.cs"
                 "${CMAKE_SOURCE_DIR}/tools/usbip-reconnect/ReconnectWatcher.cs"
                 "${CMAKE_SOURCE_DIR}/tools/usbip-reconnect/SdkTransport.cs"
