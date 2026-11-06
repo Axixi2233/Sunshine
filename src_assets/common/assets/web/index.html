@@ -142,6 +142,9 @@
       </div>
     </div>
 
+    <!-- Streaming clients -->
+    <Client-Downloads></Client-Downloads>
+
     <!-- Resources -->
     <div class="my-4">
       <Resource-Card :installed-version-not-stable="installedVersionNotStable"></Resource-Card>
@@ -155,6 +158,7 @@
   import { initApp } from './init'
   import Navbar from './Navbar.vue'
   import ResourceCard from './ResourceCard.vue'
+  import ClientDownloads from './ClientDownloads.vue'
   import SunshineVersion from './sunshine_version'
   import {
     AlertCircle,
@@ -183,6 +187,7 @@
     components: {
       Navbar,
       ResourceCard,
+      ClientDownloads,
       AlertCircle,
       AlertTriangle,
       FileText,

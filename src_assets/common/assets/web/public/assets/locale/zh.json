@@ -1,4 +1,28 @@
 {
+  "client_downloads": {
+    "title": "获取串流客户端",
+    "description": "在手机或平板安装月光/星光·阿西西客户端，连接这台运行 StarCore星核的主机。",
+    "ios_name": "星光·阿西西",
+    "ios_detail": "通过 App Store 安装，适用于 iPhone 与 iPad。",
+    "ios_action": "在 App Store 查看",
+    "android_name": "月光·阿西西",
+    "android_detail": "从夸克网盘获取 Android 安装包，并按系统提示完成安装。",
+    "android_action": "打开夸克网盘",
+    "harmonyos_name": "月光·阿西西",
+    "harmonyos_detail": "通过华为应用市场安装，适用于支持该应用的 HarmonyOS 设备。",
+    "harmonyos_action": "在华为应用市场查看",
+    "qr_alt": "{platform} 客户端下载二维码",
+    "scan": "使用对应设备扫码",
+    "copy": "复制链接",
+    "copied": "链接已复制",
+    "copy_failed": "无法复制链接，请打开下载页面后复制地址。",
+    "guide_title": "安装后如何连接",
+    "guide_description": "首次连接时，请让客户端设备与这台电脑处于同一局域网，并保持 StarCore星核运行。",
+    "step_1": "选择对应平台，下载安装客户端。",
+    "step_2": "在客户端选择这台电脑，或手动添加主机 IP 地址。",
+    "step_3": "在配对页面输入客户端显示的 PIN，完成配对。",
+    "open_pairing": "打开配对页面"
+  },
   "login": {
     "title": "登录 StarCore星核",
     "description": "请输入账号和密码，以管理这台主机。",

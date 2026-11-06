@@ -1,4 +1,28 @@
 {
+  "client_downloads": {
+    "title": "Get a streaming client",
+    "description": "Install Starlight or Moonlight on your phone or tablet to connect to this StarCore host.",
+    "ios_name": "Starlight · Axixi",
+    "ios_detail": "Install from the App Store on your iPhone or iPad.",
+    "ios_action": "View in App Store",
+    "android_name": "Moonlight · Axixi",
+    "android_detail": "Download the Android package from Quark Drive and follow the installation prompts.",
+    "android_action": "Open Quark Drive",
+    "harmonyos_name": "Moonlight · Axixi",
+    "harmonyos_detail": "Install from Huawei AppGallery on a supported HarmonyOS device.",
+    "harmonyos_action": "View in AppGallery",
+    "qr_alt": "{platform} client download QR code",
+    "scan": "Scan with the device you want to use",
+    "copy": "Copy link",
+    "copied": "Link copied",
+    "copy_failed": "Could not copy the link. Open the download page and copy its address.",
+    "guide_title": "Connect after installing",
+    "guide_description": "For the first connection, use the same local network as this PC and keep StarCore running.",
+    "step_1": "Install the client for your device.",
+    "step_2": "Select this PC in the client, or add its IP address manually.",
+    "step_3": "Enter the PIN shown by the client on the pairing page.",
+    "open_pairing": "Open pairing"
+  },
   "login": {
     "title": "Sign in to Sunshine",
     "description": "Enter your Sunshine username and password to manage this host.",
