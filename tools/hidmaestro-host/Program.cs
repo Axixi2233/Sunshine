@@ -273,6 +273,7 @@ internal sealed class ControllerSlot : IDisposable
     private readonly Action<HMAudioOutput, bool>? pcmStreamingHandler;
     private byte sequence;
     private ushort pcmSequence;
+    private int disposed;
 
     internal ControllerSlot(
         HMController controller,
@@ -325,6 +326,8 @@ internal sealed class ControllerSlot : IDisposable
     }
 
     internal uint Id { get; }
+    /// <summary>Indicates that this device instance no longer accepts feedback.</summary>
+    internal bool IsDisposed => Volatile.Read(ref disposed) != 0;
     internal HMController Controller { get; }
     internal HMGamepadState State;
     internal Dictionary<HMAxis, float> Axes { get; }
@@ -428,6 +431,10 @@ internal sealed class ControllerSlot : IDisposable
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref disposed, 1) != 0)
+        {
+            return;
+        }
         Controller.OutputReceived -= OnOutputReceived;
         if (Controller.UsbAudio is not null)
         {
@@ -520,7 +527,7 @@ internal sealed class Host : IDisposable
     private readonly ManualResetEvent inputReportStop = new(false);
     private readonly Thread inputReportThread;
     private readonly Stopwatch sensorClock = Stopwatch.StartNew();
-    private readonly BlockingCollection<NativePcmFrame> pcmQueue = new(PcmQueueCapacity);
+    private readonly BlockingCollection<(ControllerSlot Slot, NativePcmFrame Frame)> pcmQueue = new(PcmQueueCapacity);
     private readonly Dictionary<uint, NativePcmDiagnosticWindow> pcmDiagnostics = new();
     private readonly Thread pcmWriterThread;
     private readonly object pcmIngressLock = new();
@@ -568,15 +575,9 @@ internal sealed class Host : IDisposable
             {
                 SendLog("The embedded DualSense composite profile is unavailable; native controller PCM is disabled");
             }
-            if (!context.IsDriverInstalled)
-            {
-                SendLog("Installing the HIDMaestro driver");
-                context.InstallDriver();
-            }
-            else
-            {
-                SendLog("The HIDMaestro driver is already installed");
-            }
+            // The SDK checks the driver version and upgrades older packages on demand.
+            context.InstallDriver();
+            SendLog($"HIDMaestro driver deployment: {context.LastDriverInstall}");
             SendStatus(Protocol.MessageType.Ready, 0, 0);
         }
         catch (Exception exception)
@@ -629,7 +630,10 @@ internal sealed class Host : IDisposable
             }
             controllers.Clear();
         }
-        pcmQueue.CompleteAdding();
+        lock (pcmIngressLock)
+        {
+            pcmQueue.CompleteAdding();
+        }
         if (Thread.CurrentThread != pcmWriterThread)
         {
             pcmWriterThread.Join();
@@ -768,6 +772,8 @@ internal sealed class Host : IDisposable
                    encodedPcmPayload &&
                    measuredPcmPeaks &&
                    periodicReportsTicked &&
+                   ControllerIdentity(0) == "StarCore.Sunshine.DualSense.0" &&
+                   Enumerable.Range(0, 16).Select(id => ControllerIdentity((uint)id)).Distinct().Count() == 16 &&
                    testProfile is not null &&
                    testCompositeProfile is not null &&
                    testProfile.Sticks.Count >= 2 &&
@@ -912,6 +918,9 @@ internal sealed class Host : IDisposable
         }
     }
 
+    /// <summary>Build the stable device identity for a StarCore controller slot.</summary>
+    private static string ControllerIdentity(uint id) => FormattableString.Invariant($"StarCore.Sunshine.DualSense.{id}");
+
     private void CreateController(uint id, ReadOnlySpan<byte> payload)
     {
         HMController? controller = null;
@@ -928,21 +937,20 @@ internal sealed class Host : IDisposable
                 4 => payload[0] != 0,
                 _ => throw new InvalidOperationException($"Controller {id} create payload has invalid size {payload.Length}."),
             };
-            HMProfile selectedProfile = useComposite
-                ? compositeProfile ?? throw new InvalidOperationException("The DualSense composite profile is unavailable.")
-                : profile!;
+            HMProfile selectedProfile = useComposite && compositeProfile is not null ? compositeProfile : profile!;
+            string identity = ControllerIdentity(id);
             SendLog($"Creating virtual DualSense controller {id} with profile {selectedProfile.Id}");
             try
             {
-                controller = context!.CreateController(selectedProfile);
+                controller = context!.CreateController(selectedProfile, identity);
             }
-            catch (Exception exception) when (useComposite)
+            catch (Exception exception) when (selectedProfile == compositeProfile)
             {
                 SendLog($"Composite DualSense creation failed for controller {id}: {exception.Message}; falling back to the standard profile");
                 selectedProfile = profile!;
-                controller = context!.CreateController(selectedProfile);
+                controller = context!.CreateController(selectedProfile, identity);
             }
-            SendLog($"HIDMaestro created the device for controller {id}");
+            SendLog($"HIDMaestro created the device for controller {id} (HID driver {controller.DriverVersion?.ToString() ?? "unreported"})");
             slot = new ControllerSlot(controller, selectedProfile, id, HandleOutput, HandleNativePcm, HandleNativePcmStreamingChanged);
             controller = null;
             controllers.Add(id, slot);
@@ -957,12 +965,9 @@ internal sealed class Host : IDisposable
         }
         catch (Exception exception)
         {
-            if (controllers.Remove(id, out ControllerSlot? registeredSlot))
+            if (slot is not null)
             {
-                registeredSlot.Dispose();
-            }
-            else if (slot is not null)
-            {
+                controllers.Remove(id);
                 slot.Dispose();
             }
             else
@@ -1083,6 +1088,10 @@ internal sealed class Host : IDisposable
 
     private void HandleOutput(ControllerSlot slot, HMOutputPacket packet)
     {
+        if (slot.IsDisposed)
+        {
+            return;
+        }
         if (!TryGetDualSenseUsbOutput(packet.ReportId, packet.Data.Span, out ReadOnlySpan<byte> output))
         {
             if (!slot.LoggedUnsupportedOutput)
@@ -1173,6 +1182,10 @@ internal sealed class Host : IDisposable
 
     private void HandleNativePcmStreamingChanged(ControllerSlot slot, HMAudioOutput output, bool streaming)
     {
+        if (slot.IsDisposed)
+        {
+            return;
+        }
         SendLog($"DS5 native PCM stream {slot.Id} {(streaming ? "started" : "stopped")}: {output.Channels} channels at {output.SampleRateHz} Hz");
     }
 
@@ -1188,6 +1201,10 @@ internal sealed class Host : IDisposable
         int maxChunkBytes = MaxPcmBytes - (MaxPcmBytes % frameBytes);
         lock (pcmIngressLock)
         {
+            if (slot.IsDisposed)
+            {
+                return;
+            }
             ReadOnlySpan<byte> remaining = pcm.Span;
             while (!remaining.IsEmpty)
             {
@@ -1204,13 +1221,13 @@ internal sealed class Host : IDisposable
                     checked((byte)output.BitsPerSample),
                     checked((uint)output.SampleRateHz),
                     remaining[..chunkBytes].ToArray());
-                if (!pcmQueue.TryAdd(frame))
+                if (!pcmQueue.TryAdd((slot, frame)))
                 {
                     if (pcmQueue.TryTake(out _))
                     {
                         Interlocked.Increment(ref droppedPcmFrames);
                     }
-                    if (!pcmQueue.TryAdd(frame))
+                    if (!pcmQueue.TryAdd((slot, frame)))
                     {
                         Interlocked.Increment(ref droppedPcmFrames);
                     }
@@ -1222,9 +1239,13 @@ internal sealed class Host : IDisposable
 
     private void PcmWriterLoop()
     {
-        foreach (NativePcmFrame frame in pcmQueue.GetConsumingEnumerable())
+        foreach (var (slot, frame) in pcmQueue.GetConsumingEnumerable())
         {
-            Send(Protocol.MessageType.ControllerPcm, frame.ControllerId, BuildPcmPayload(frame));
+            if (slot.IsDisposed)
+            {
+                continue;
+            }
+            Send(Protocol.MessageType.ControllerPcm, frame.ControllerId, BuildPcmPayload(frame), slot);
             int dropped = Interlocked.Exchange(ref droppedPcmFrames, 0);
             if (!pcmDiagnostics.TryGetValue(frame.ControllerId, out NativePcmDiagnosticWindow? diagnostics))
             {
@@ -1322,10 +1343,14 @@ internal sealed class Host : IDisposable
         Send(Protocol.MessageType.Log, 0, Encoding.UTF8.GetBytes(message));
     }
 
-    private void Send(Protocol.MessageType type, uint id, ReadOnlySpan<byte> payload)
+    private void Send(Protocol.MessageType type, uint id, ReadOnlySpan<byte> payload, ControllerSlot? slot = null)
     {
         lock (writeLock)
         {
+            if (slot?.IsDisposed == true)
+            {
+                return;
+            }
             try
             {
                 Span<byte> header = stackalloc byte[Protocol.HeaderSize];

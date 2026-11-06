@@ -343,8 +343,11 @@ editing the `conf` file in a text editor. Use the examples as reference.
         <td>ds5</td>
         <td>DualSense controller (PS5)
             @note{This option applies to FreeBSD, Linux, and Windows. On Windows, Sunshine uses the bundled
-            HIDMaestro helper to create a USB DualSense. The helper installs or verifies its driver when Sunshine
-            starts, so the Sunshine process must have administrator privileges. DualSense lightbar, player-indicator,
+            HIDMaestro 2.1.0 helper to create a USB DualSense. When the DualSense backend initializes, the helper
+            checks the driver version and installs or upgrades the driver as needed. The Sunshine process must have
+            administrator privileges. When upgrading from 1.x, close other programs using the old HIDMaestro SDK
+            before starting the new backend. The first upgrade can change the Windows device path. Subsequent device
+            creations use a stable identity for each StarCore controller slot. DualSense lightbar, player-indicator,
             adaptive-trigger, touch, and motion forwarding also require matching support in the Moonlight client.
             When a client advertises native controller PCM support, Sunshine selects HIDMaestro's full composite
             DualSense profile and forwards the game's authored 4-channel, 48 kHz, 16-bit USB audio/haptics stream.
