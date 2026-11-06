@@ -1342,10 +1342,29 @@ namespace input {
     }
 
     auto &gamepad = input->gamepads[packet->controllerNumber];
+    const bool active = (packet->activeGamepadMask & (1 << packet->controllerNumber)) != 0;
+
+    // A USB/IP handoff can follow an ordinary removal that already detached the device.
+    if (is_usbip_gamepad_retirement(active, packet->buttonFlags, packet->buttonFlags2)) {
+      if (gamepad.back_timeout_id) {
+        task_pool.cancel(gamepad.back_timeout_id);
+        gamepad.back_timeout_id = nullptr;
+      }
+      const auto id = gamepad.id >= 0 ? gamepad.id : gamepad.retained_id;
+      if (id >= 0) {
+        free_gamepad(platf_input, id);
+        BOOST_LOG(info) << "Released virtual gamepad "sv << packet->controllerNumber << " for USB/IP handoff"sv;
+      }
+      gamepad.id = -1;
+      gamepad.retained_id = -1;
+      gamepad.gamepad_state = {};
+      gamepad.back_button_state = button_state_e::NONE;
+      return;
+    }
 
     // If this is an event for a new gamepad, create the gamepad now. Ideally, the client would
     // send a controller arrival instead of this but it's still supported for legacy clients.
-    if ((packet->activeGamepadMask & (1 << packet->controllerNumber)) && gamepad.id < 0) {
+    if (active && gamepad.id < 0) {
       const bool reusing_id = gamepad.retained_id >= 0;
       const auto id = reusing_id ? gamepad.retained_id : alloc_id(gamepadMask);
       if (id < 0) {
@@ -1363,7 +1382,7 @@ namespace input {
 
       gamepad.id = id;
       gamepad.retained_id = -1;
-    } else if (!(packet->activeGamepadMask & (1 << packet->controllerNumber)) && gamepad.id >= 0) {
+    } else if (!active && gamepad.id >= 0) {
       // Preserve backends that support stable device identity until this stream ends.
       free_gamepad(platf_input, gamepad.id, true);
       gamepad.retained_id = gamepad.id;

@@ -14,6 +14,19 @@
 namespace input {
   struct input_t;
 
+  constexpr std::uint16_t USBIP_RETIRE_BUTTON_FLAGS2 = 0x4000;  ///< Bit 30 of the controller flags marks a USB/IP handoff release.
+
+  /**
+   * @brief Check for the explicit USB/IP handoff marker on an inactive controller slot.
+   * @param active Whether the packet still advertises the slot as active.
+   * @param buttons Low word of the controller button flags.
+   * @param buttons_high High word of the controller button flags.
+   * @return True when the old OS device should be destroyed rather than retained.
+   */
+  constexpr bool is_usbip_gamepad_retirement(bool active, std::uint16_t buttons, std::uint16_t buttons_high) {
+    return !active && buttons == 0 && buttons_high == USBIP_RETIRE_BUTTON_FLAGS2;
+  }
+
   /**
    * @brief Write a debug log representation of the input packet.
    *
