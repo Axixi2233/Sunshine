@@ -47,6 +47,9 @@ if(HIDMAESTRO_HOST_EXECUTABLE)
             DESTINATION "licenses/HIDMaestro"
             COMPONENT application)
 endif()
+if(USBIP_RECONNECT_EXECUTABLE)
+    install(PROGRAMS "${USBIP_RECONNECT_EXECUTABLE}" DESTINATION "tools" COMPONENT application)
+endif()
 
 # Virtual display driver
 install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/drivers/sudovda"

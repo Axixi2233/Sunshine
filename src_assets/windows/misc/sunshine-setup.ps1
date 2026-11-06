@@ -447,7 +447,7 @@ if ($Action -eq "install") {
         -Color "Yellow"
     Write-Information ""
 
-    $totalSteps = 7
+    $totalSteps = 8
     $currentStep = 0
 
     # Reset permissions on the install directory
@@ -555,6 +555,20 @@ if ($Action -eq "install") {
         -ScriptPath $addFirewallScript `
         -Description "Adding firewall rules" `
         -Emoji "🛡️"
+    Write-Information ""
+
+    # Prepare the shared USB/IP transport before a newly started service can use it.
+    $currentStep++
+    Write-Progress `
+        -Activity "Installing Sunshine" `
+        -Status "Preparing USB/IP driver" `
+        -PercentComplete (($currentStep / $totalSteps) * 100)
+    $usbIpHelper = Join-Path $RootDir "tools\usbip-reconnect.exe"
+    Invoke-ScriptIfExist `
+        -ScriptPath $usbIpHelper `
+        -Arguments "--prepare-driver" `
+        -Description "Preparing the bundled USB/IP host controller" `
+        -Emoji "🔌"
     Write-Information ""
 
     # 4. Install service

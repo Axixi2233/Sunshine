@@ -2,6 +2,8 @@ using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
 
+await LifecycleTests.Run();
+
 // Exercise the real DEVLIST probe against bounded loopback fixtures without touching the USB driver.
 var assembly = Assembly.Load("usbip-reconnect");
 var method = assembly.GetType("Sunshine.UsbIpReconnect.Program")!

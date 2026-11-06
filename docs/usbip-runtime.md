@@ -1,0 +1,11 @@
+# Android USB/IP runtime and Windows packaging
+
+Android's existing USB/IP setting adds `usbipMode=1` to the paired HTTPS launch/resume query. Missing, disabled or other values leave ordinary streaming unchanged. The Windows stream uses its actual RTSP peer address, accepts only RFC1918 IPv4 (including IPv4-mapped IPv6 representations), and launches `tools/usbip-reconnect.exe --watch <IPv4> <Sunshine PID> <launch ID>`. The export is fixed to TCP 3240 and bus `1-1`; there is no client-supplied destination or arbitrary port.
+
+The helper is published self-contained for Windows x64, with HIDMaestro 2.1.0 and its USB/IP payload embedded. No installed .NET runtime or development SDK path is required. `--check-sdk` validates the embedded interfaces without installing a driver. `--prepare-driver` invokes the pinned SDK's `EnsureInstalled` policy: install missing host-controller support, preserve supported existing transports, and apply eligible SDK-managed upgrades when Windows allows it. It does not run a full usbip-win2 installer or install its root-hub filter.
+
+The Windows setup script runs driver preparation before starting Sunshine's service. Preparation failures are logged and ordinary Sunshine installation/streaming can continue. Portable use prepares the transport when the opted-in session starts; first-time driver installation needs administrator privileges. The existing shared USB/IP driver remains installed on StarCore uninstall because other programs may use it.
+
+Each stream owns a manual-reset cancellation event and one helper process. Disconnect signals the event; parent exit is also detected. The helper cancels pending attempts and detaches only its own imported location/port. An import already present when the helper starts is left alone. Replug readiness uses bounded DEVLIST probes before retrying, preserving the existing fast reconnect behavior and virtual-controller fallback until the physical import is confirmed.
+
+Logs are appended to `config/usbip.log`; Sunshine's main log records importer startup and missing helper errors. Android keeps reporting the endpoint and handoff status in the full performance overlay. There is no new menu option. Older Android builds without the launch flag require their former manual importer; update both ends to use automatic session startup.

@@ -41,6 +41,7 @@ extern "C" {
 #include "sync.h"
 #include "system_tray.h"
 #include "thread_safe.h"
+#include "usbip.h"
 #include "utility.h"
 
 constexpr int IDX_START_A = 0;  ///< Control-stream message index for the first stream-start packet.
@@ -528,6 +529,8 @@ namespace stream {
   struct session_t {
     config_t config;  ///< Stream or encoder configuration captured for the worker.
     std::string unique_id;  ///< Moonlight unique ID used to claim microphone uplink.
+    bool usbip_requested {};  ///< Whether this client explicitly enabled USB/IP mode.
+    std::atomic<std::shared_ptr<usbip::session_t>> usbip_importer;  ///< Importer shared safely with the stop path.
 
     safe::mail_t mail;  ///< Mailbox used to distribute packets and lifecycle events.
 
@@ -2603,6 +2606,7 @@ namespace stream {
       }
 
       session.shutdown_event->raise(true);
+      usbip::request_stop(session.usbip_importer.load());
     }
 
     /**
@@ -2629,6 +2633,7 @@ namespace stream {
       session.audioThread.join();
       BOOST_LOG(debug) << "Waiting for control to end..."sv;
       session.controlEnd.view();
+      session.usbip_importer.store(nullptr);
       // Reset input on session stop to avoid stuck repeated keys
       BOOST_LOG(debug) << "Resetting Input..."sv;
       input::reset(session.input);
@@ -2697,6 +2702,7 @@ namespace stream {
       session.audioThread = std::jthread {audioThread, &session};
       session.videoThread = std::jthread {videoThread, &session};
 
+      session.usbip_importer.store(usbip::start(session.usbip_requested, addr_string, session.launch_session_id));
       session.state.store(state_e::RUNNING, std::memory_order_relaxed);
 
       // If this is the first session, invoke the platform callbacks
@@ -2724,6 +2730,7 @@ namespace stream {
 
       session->config = config;
       session->unique_id = launch_session.unique_id;
+      session->usbip_requested = launch_session.usbip_mode;
 
       session->control.connect_data = launch_session.control_connect_data;
       session->control.feedback_queue = mail->queue<platf::gamepad_feedback_msg_t>(mail::gamepad_feedback);

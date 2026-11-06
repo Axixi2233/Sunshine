@@ -98,3 +98,31 @@ list(APPEND SUNSHINE_TARGET_DEPENDENCIES hidmaestro-host)
 set(HIDMAESTRO_HOST_EXECUTABLE "${HIDMAESTRO_HOST_EXECUTABLE}" CACHE INTERNAL "HIDMaestro helper executable")
 set(HIDMAESTRO_LICENSE_FILE "${HIDMAESTRO_EXTRACT_DIR}/LICENSE" CACHE INTERNAL "HIDMaestro license")
 set(HIDMAESTRO_NOTICES_FILE "${HIDMAESTRO_EXTRACT_DIR}/THIRD-PARTY-NOTICES.txt" CACHE INTERNAL "HIDMaestro notices")
+
+# Publish the LAN USB/IP importer with the same pinned SDK and embedded driver payloads.
+set(USBIP_RECONNECT_PROJECT "${CMAKE_SOURCE_DIR}/tools/usbip-reconnect/usbip-reconnect.csproj")
+set(USBIP_RECONNECT_EXECUTABLE "${CMAKE_BINARY_DIR}/tools/usbip-reconnect.exe")
+set(USBIP_RECONNECT_INTERMEDIATE_DIR "${CMAKE_BINARY_DIR}/usbip-reconnect")
+add_custom_command(
+        OUTPUT "${USBIP_RECONNECT_EXECUTABLE}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/tools"
+        COMMAND "${DOTNET_EXECUTABLE}" publish "${USBIP_RECONNECT_PROJECT}"
+                --configuration Release --runtime win-x64
+                --output "${CMAKE_BINARY_DIR}/tools" --nologo
+                "-p:HIDMaestroSdkDir=${HIDMAESTRO_SDK_DIR}"
+                "-p:BaseIntermediateOutputPath=${USBIP_RECONNECT_INTERMEDIATE_DIR}/obj/"
+                "-p:BaseOutputPath=${USBIP_RECONNECT_INTERMEDIATE_DIR}/bin/"
+        DEPENDS
+                "${USBIP_RECONNECT_PROJECT}"
+                "${CMAKE_SOURCE_DIR}/tools/usbip-reconnect/Program.cs"
+                "${CMAKE_SOURCE_DIR}/tools/usbip-reconnect/WatchOptions.cs"
+                "${CMAKE_SOURCE_DIR}/tools/usbip-reconnect/ReconnectWatcher.cs"
+                "${CMAKE_SOURCE_DIR}/tools/usbip-reconnect/SdkTransport.cs"
+                "${HIDMAESTRO_SDK_DIR}/HIDMaestro.Core.dll"
+                "${HIDMAESTRO_SDK_DIR}/Microsoft.Windows.SDK.NET.dll"
+                "${HIDMAESTRO_SDK_DIR}/WinRT.Runtime.dll"
+        COMMENT "Publishing session-owned USB/IP importer"
+        VERBATIM)
+add_custom_target(usbip-reconnect DEPENDS "${USBIP_RECONNECT_EXECUTABLE}")
+list(APPEND SUNSHINE_TARGET_DEPENDENCIES usbip-reconnect)
+set(USBIP_RECONNECT_EXECUTABLE "${USBIP_RECONNECT_EXECUTABLE}" CACHE INTERNAL "Bundled USB/IP importer")

@@ -8,80 +8,51 @@ namespace Sunshine.UsbIpReconnect;
 /// <summary>Reconnects one Android USB/IP export while its Sunshine process is alive.</summary>
 internal static class Program
 {
-    /// <summary>Watch an exact host, TCP port and bus ID using the installed HIDMaestro SDK.</summary>
+    /// <summary>Prepare the bundled transport or watch the explicitly opted-in stream client's export.</summary>
     private static async Task<int> Main(string[] args)
     {
-        if (args.Length != 5 || !IPAddress.TryParse(args[1], out var host)
-                || host.AddressFamily != AddressFamily.InterNetwork
-                || !int.TryParse(args[2], out var port) || port < 1 || port > 65535
-                || args[3].Length == 0 || args[3].Length > 31
-                || !int.TryParse(args[4], out var ownerPid))
-        {
-            Console.Error.WriteLine("Usage: usbip-reconnect <HIDMaestro.Core.dll> <IPv4> <port> <busid> <Sunshine PID>");
-            return 2;
-        }
-
-        using var owner = Process.GetProcessById(ownerPid);
-        if (!owner.ProcessName.Equals("sunshine", StringComparison.OrdinalIgnoreCase))
-        {
-            Console.Error.WriteLine("The owner process must be Sunshine.");
-            return 2;
-        }
-        // A named event's lifetime follows its open handles without thread-affine ownership.
-        using var singleton = new EventWaitHandle(false, EventResetMode.ManualReset,
-            $"Local\\StarCoreUsbIp-{host}-{port}-{args[3]}", out bool createdNew);
-        if (!createdNew)
-        {
-            Console.Error.WriteLine("This USB/IP location is already being watched.");
-            return 2;
-        }
-
-        var sdk = Assembly.LoadFrom(Path.GetFullPath(args[0]));
-        var client = sdk.GetType("HIDMaestro.Internal.Usbip.VhciClient", throwOnError: true)!;
-        var locationTypes = new[] { typeof(string), typeof(int), typeof(string) };
-        var attach = Method(client, "Attach", locationTypes);
-        var stop = Method(client, "StopAttachAttempts", locationTypes);
-        var find = Method(client, "FindLocation", locationTypes);
-        object[] location = { host.ToString(), port, args[3] };
-        Log($"Watching {host}:{port}/{args[3]} for Sunshine PID {ownerPid}");
-        int lastPort = -1;
-        while (!owner.HasExited)
-        {
-            try
-            {
-                int currentPort = (int)find.Invoke(null, location)!;
-                if (currentPort != lastPort)
-                {
-                    Log(currentPort > 0 ? $"Imported on VHCI port {currentPort}" : "Waiting for Android export");
-                    lastPort = currentPort;
-                }
-                if (currentPort <= 0)
-                {
-                    // Cancel only this location's slow kernel retry, including an old pending timer.
-                    stop.Invoke(null, location);
-                    if (await IsExportReady(host, port, args[3]))
-                    {
-                        var elapsed = Stopwatch.StartNew();
-                        int importedPort = (int)attach.Invoke(null, location)!;
-                        Log($"Attached on VHCI port {importedPort} in {elapsed.ElapsedMilliseconds} ms");
-                    }
-                }
+        try {
+            if (args.SequenceEqual(new[] { "--prepare-driver" })) {
+                SdkTransport.Prepare(Log);
+                Log("USB/IP transport is ready");
+                return 0;
             }
-            catch (Exception error) when (error is TargetInvocationException or IOException or SocketException)
-            {
-                Log($"Reconnect pending: {(error.InnerException ?? error).Message}");
-                await Task.Delay(1000);
+            if (args.SequenceEqual(new[] { "--check-sdk" })) {
+                _ = new SdkTransport(new WatchOptions(IPAddress.Parse("192.168.1.1"), 1, 0));
+                Log("Embedded USB/IP SDK interfaces are available");
+                return 0;
             }
-            await Task.Delay(500);
+            if (!WatchOptions.TryParse(args, out var options) || options is null) {
+                Console.Error.WriteLine("Usage: usbip-reconnect --prepare-driver | --check-sdk | --watch <private IPv4> <Sunshine PID> <session ID>");
+                return 2;
+            }
+            using var owner = Process.GetProcessById(options.OwnerPid);
+            if (!owner.ProcessName.Equals("sunshine", StringComparison.OrdinalIgnoreCase)) return 2;
+            using var stopEvent = EventWaitHandle.OpenExisting(options.StopEvent);
+            using var singleton = new EventWaitHandle(false, EventResetMode.ManualReset,
+                    $"Local\\StarCoreUsbIp-{options.Host}-{WatchOptions.Port}-{WatchOptions.BusId}", out bool createdNew);
+            if (!createdNew) { Log("This USB/IP export is already watched"); return 2; }
+            Log($"Watching {options.Host}:{WatchOptions.Port}/{WatchOptions.BusId} for Sunshine PID {options.OwnerPid}, session {options.SessionId}");
+            SdkTransport.Prepare(Log);
+            if (owner.HasExited || stopEvent.WaitOne(0)) {
+                Log("Stream ended while its USB/IP driver was being prepared");
+                return 0;
+            }
+            using var cancellation = new CancellationTokenSource();
+            var watcher = new ReconnectWatcher(new SdkTransport(options),
+                    _ => IsExportReady(options.Host, WatchOptions.Port, WatchOptions.BusId), Log, TimeSpan.FromMilliseconds(500));
+            var task = Task.Run(() => watcher.Run(cancellation.Token));
+            while (!task.IsCompleted && !owner.HasExited && !stopEvent.WaitOne(0)) await Task.Delay(100);
+            cancellation.Cancel();
+            watcher.CancelAttach();
+            await task.WaitAsync(TimeSpan.FromSeconds(3));
+            Log("Stream ended; USB/IP watcher stopped");
+            return 0;
+        } catch (Exception error) {
+            Log("USB/IP helper failed: " + (error.InnerException ?? error).Message);
+            return 1;
         }
-        Log("Sunshine exited; reconnect watcher stopped");
-        return 0;
     }
-
-    /// <summary>Resolve an exact SDK signature so an incompatible SDK fails before starting the watcher.</summary>
-    private static MethodInfo Method(Type client, string name, Type[] arguments) =>
-        client.GetMethod(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static, arguments)
-            ?? throw new MissingMethodException(client.FullName, name);
 
     /// <summary>Probe DEVLIST with a bounded timeout before issuing a potentially blocking driver import.</summary>
     private static async Task<bool> IsExportReady(IPAddress host, int port, string busId)
@@ -115,6 +86,16 @@ internal static class Program
     }
 
     /// <summary>Record reconnect transitions for correlating the Windows and Android timelines.</summary>
-    private static void Log(string text) =>
-        Console.WriteLine($"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz} {text}");
+    private static void Log(string text)
+    {
+        string line = $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz} [{Environment.ProcessId}] {text}";
+        Console.WriteLine(line);
+        try {
+            string directory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "config"));
+            Directory.CreateDirectory(directory);
+            File.AppendAllText(Path.Combine(directory, "usbip.log"), line + Environment.NewLine);
+        } catch (Exception error) when (error is IOException or UnauthorizedAccessException) {
+            // Diagnostics must not prevent importing or releasing the device.
+        }
+    }
 }

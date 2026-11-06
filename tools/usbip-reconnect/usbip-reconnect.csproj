@@ -1,10 +1,23 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <PublishTrimmed>false</PublishTrimmed>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <HIDMaestroSdkDir Condition="'$(HIDMaestroSdkDir)' == ''">$(MSBuildProjectDirectory)\..\hidmaestro-host\sdk</HIDMaestroSdkDir>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <NuGetAudit>false</NuGetAudit>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="obj/**/*.cs;bin/**/*.cs" />
+    <Reference Include="HIDMaestro.Core"><HintPath>$(HIDMaestroSdkDir)\HIDMaestro.Core.dll</HintPath><Private>true</Private></Reference>
+    <Reference Include="Microsoft.Windows.SDK.NET"><HintPath>$(HIDMaestroSdkDir)\Microsoft.Windows.SDK.NET.dll</HintPath><Private>true</Private></Reference>
+    <Reference Include="WinRT.Runtime"><HintPath>$(HIDMaestroSdkDir)\WinRT.Runtime.dll</HintPath><Private>true</Private></Reference>
+    <InternalsVisibleTo Include="usbip-reconnect-tests" />
+  </ItemGroup>
 </Project>
