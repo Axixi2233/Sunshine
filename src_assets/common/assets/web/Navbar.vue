@@ -42,6 +42,12 @@
                 {{ $t('navbar.troubleshoot') }}
               </a>
             </li>
+            <li class="nav-item">
+              <a class="nav-link" href="https://www.axixi.top/" target="_blank" rel="noopener noreferrer">
+                <Globe :size="18" class="icon"></Globe>
+                更多应用
+              </a>
+            </li>
           </ul>
           <ul class="navbar-nav ms-auto mb-2 mb-lg-0">
             <li class="nav-item">
@@ -77,16 +83,18 @@
 </template>
 
 <script>
-import { CircleUserRound, Home, Info, Layers, Lock, LogOut, Settings, Shield } from '@lucide/vue'
+import { CircleUserRound, Globe, Home, Info, Layers, Lock, LogOut, Settings, Shield } from '@lucide/vue'
 import ThemeToggle from './ThemeToggle.vue'
 import Notification from './Notification.vue'
 import { notifyKey } from './Notification.vue'
+import { isCurrentNavigationLink } from './navigation'
 
 export default {
   components: {
     ThemeToggle,
     Notification,
     Home,
+    Globe,
     Lock,
     Layers,
     Settings,
@@ -99,21 +107,12 @@ export default {
     console.log("Header mounted!")
   },
   mounted() {
-    const currentPath = globalThis.location.pathname.replace(/\/$/, '') || '/'
     const links = document.querySelectorAll('.navbar-sunshine a[href]')
 
     for (const link of links) {
-      const href = link.getAttribute('href')
-      if (!href || href === '#') {
-        continue
+      if (isCurrentNavigationLink(link.getAttribute('href'), globalThis.location.href)) {
+        link.classList.add('active')
       }
-
-      const linkPath = new URL(href, globalThis.location.href).pathname.replace(/\/$/, '') || '/'
-      if (linkPath !== currentPath) {
-        continue
-      }
-
-      link.classList.add('active')
     }
   },
   methods: {

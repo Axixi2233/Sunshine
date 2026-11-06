@@ -11,14 +11,6 @@
                   <BookOpen :size="18" class="icon"></BookOpen>
                   {{ $t('resource_card.documentation') }}
                 </a>
-                <a class="btn btn-primary" href="https://www.axixi.top/" target="_blank">
-                  <Globe :size="18" class="icon"></Globe>
-                  个人空间·阿西西
-                </a>
-                <a class="btn btn-secondary" href="https://github.com/orgs/LizardByte/discussions" target="_blank">
-                  <SimpleIcon icon="GitHub" :size="18" class="icon"></SimpleIcon>
-                  {{ $t('resource_card.github_discussions') }}
-                </a>
             </div>
         </div>
     </div>
@@ -50,7 +42,6 @@ import {
   FileText,
   Globe,
 } from '@lucide/vue'
-import SimpleIcon from './SimpleIcon.vue'
 
 export default {
   props: {
@@ -60,7 +51,6 @@ export default {
     }
   },
   components: {
-    SimpleIcon,
     AlertCircle,
     BookOpen,
     FileText,
